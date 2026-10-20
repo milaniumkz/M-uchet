@@ -6,6 +6,32 @@ import '../backend/rest/retriable_command.dart';
 import 'commercial_repository.dart';
 import 'counterparty_workspace.dart';
 
+Future<bool?> showCatalogResource(
+  BuildContext context, {
+  required BackendClient api,
+  required String companyId,
+  required String kind,
+  required ResourceDto resource,
+}) => showDialog<bool>(
+  context: context,
+  barrierDismissible: false,
+  builder: (_) => _ResourceEditor(
+    api: api,
+    companyId: companyId,
+    kind: kind,
+    title:
+        const {
+          'clients': 'Клиенты',
+          'suppliers': 'Поставщики',
+          'services': 'Услуги',
+          'nomenklatura': 'Товары',
+          'warehouses': 'Склады',
+        }[kind] ??
+        kind,
+    previous: resource,
+  ),
+);
+
 class CatalogWorkspace extends StatefulWidget {
   const CatalogWorkspace({
     super.key,

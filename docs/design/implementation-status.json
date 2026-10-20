@@ -10,7 +10,7 @@
       "status": "partial",
       "visual_parity_verified": false,
       "source": "lib/main_server.dart",
-      "implemented_scope": "Проекты, сводка, период и денежные операции"
+      "implemented_scope": "Проекты, сводка, период и денежные операции; общий поиск фирмы с переходом в карточки"
     },
     {
       "id": "D-02",

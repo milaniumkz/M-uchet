@@ -1,3 +1,5 @@
+import { Writable } from 'node:stream';
+import { privateLoggerOptions } from '../src/logging.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -1197,4 +1199,49 @@ test('production ignores registration flags and explicit test registration overr
  const response=await app.inject({method:'POST',url:'/v1/auth/register',payload:{login:'uninvited@example.test',password:'SYNTHETIC PASSWORD',name:'Uninvited'}});
  assert.equal(response.statusCode,403);assert.equal(response.json().error,'registration_disabled');
  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM users').get()).n,0);
+});
+
+test('global company search respects category permissions and company boundaries and treats wildcard characters literally',async t=>{
+ const f=await fixture(t),name='NEEDLE SEARCH';
+ const project=(await f.api('POST','/projects',{name})).body;
+ const service=(await f.api('POST','/resources/services',{data:{name:name+' SERVICE'}})).body;
+ const employee=(await f.api('POST','/employees',{name:name+' PRIVATE EMPLOYEE',identifier:'111111111111',jobTitle:'SYNTHETIC JOB',hireDate:'2026-01-01',grossBase:0,status:'ACTIVE',resident:true,citizenship:'KZ',standardDeductionDeclaration:false})).body;assert.ok(employee.id);
+ const result=await f.api('GET','/search?q=NEEDLE');assert.equal(result.status,200,JSON.stringify(result.body));
+ assert.ok(result.body.items.some(x=>x.id===project.id&&x.kind==='PROJECT'));assert.ok(result.body.items.some(x=>x.id===employee.id&&x.kind==='EMPLOYEE'));assert.equal(JSON.stringify(result.body).includes('111111111111'),false);
+ const reader=await f.user('search-reader@example.test');assert.equal((await f.call('GET',f.prefix+'/search?q=NEEDLE',null,reader.token)).status,404);
+ await f.api('PUT',`/members/${reader.id}`,{permissions:['catalog.read']});
+ const limited=(await f.call('GET',f.prefix+'/search?q=NEEDLE',null,reader.token)).body.items;assert.deepEqual(limited.map(x=>x.id),[service.id]);
+ assert.equal((await f.call('GET',f.prefix+'/search?q=111111111111',null,reader.token)).body.items.length,0);
+ await f.api('PUT',`/members/${reader.id}`,{permissions:[]});assert.deepEqual((await f.call('GET',f.prefix+'/search?q=NEEDLE',null,reader.token)).body.items,[]);
+ const foreign=(await f.call('POST','/v1/companies',{name:'Other firm',currency:'KZT'},reader.token)).body;
+ await f.call('POST',`/v1/companies/${foreign.id}/resources/services`,{data:{name:'NEEDLE FOREIGN'}},reader.token,randomUUID());
+ assert.equal((await f.api('GET','/search?q=FOREIGN')).body.items.length,0);
+ const literal=(await f.api('POST','/resources/services',{data:{name:'Literal100%_ entry'}})).body;
+ await f.api('POST','/resources/services',{data:{name:'Literal100xx entry'}});
+ assert.deepEqual((await f.api('GET','/search?q='+encodeURIComponent('100%_'))).body.items.map(x=>x.id),[literal.id]);
+ assert.equal((await f.api('GET','/search?q=N')).status,400);assert.equal((await f.api('GET','/search?q=NEEDLE&limit=51')).status,400);
+});
+
+test('global search finds numbered service and goods documents and reports a bounded result set',async t=>{
+ const f=await commercialFixture(t),refs=await f.catalog();
+ const act=(await f.api('POST','/commercial-documents',f.body)).body;
+ const goods=(await f.api('POST','/orders',{businessDate:'2026-01-01',counterpartyId:f.client.id,items:[{...refs,quantity:1,unitPrice:100}]})).body;
+ let result=(await f.api('GET','/search?q='+encodeURIComponent(act.number))).body;
+ assert.ok(result.items.some(x=>x.id===act.id&&x.kind==='SALE_ACT'));
+ result=(await f.api('GET','/search?q='+encodeURIComponent(goods.number))).body;assert.ok(result.items.some(x=>x.id===goods.id&&x.kind==='GOODS'));
+ result=(await f.api('GET','/search?q=SYNTHETIC')).body;
+ assert.ok(result.items.some(x=>x.id===act.id));assert.ok(result.items.some(x=>x.id===goods.id));
+ result=(await f.api('GET','/search?q=SYNTHETIC&limit=1')).body;assert.equal(result.items.length,1);assert.equal(result.hasMore,true);
+});
+
+test('production request logs omit search queries, credentials and private database error details',async t=>{
+ let logs='';const stream=new Writable({write(chunk,_encoding,done){logs+=chunk.toString();done();}});
+ const f=await fixture(t,{logger:privateLoggerOptions({stream})});
+ await f.api('GET','/search?q=private-iin-111111111111');
+ const prepare=f.app.db.prepare;
+ f.app.db.prepare=sql=>{if(sql.startsWith('SELECT id,name AS title'))throw Object.assign(new Error('SECRET_SQL_RECORD'),{code:'23514',detail:'SECRET_ROW_CONTENT'});return prepare(sql);};
+ try{assert.equal((await f.api('GET','/search?q=force-error')).status,500);}finally{f.app.db.prepare=prepare;}
+ assert.ok(logs.includes('23514'));assert.equal(logs.includes('SECRET_SQL_RECORD'),false);assert.equal(logs.includes('SECRET_ROW_CONTENT'),false);
+ assert.equal(logs.includes('private-iin-111111111111'),false);
+ assert.equal(logs.includes('correct-horse-battery'),false);assert.equal(logs.includes(f.owner.token),false);
 });

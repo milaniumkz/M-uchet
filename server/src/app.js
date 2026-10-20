@@ -1,3 +1,5 @@
+import { safeErrorSummary } from './logging.js';
+import { registerSearchRoutes } from './search.js';
 import { registerTaxCalendarRoutes } from './tax-calendar.js';
 import { registerPayrollRoutes } from './payroll.js';
 import { projectOrderPayments } from './order-payments.js';
@@ -56,7 +58,7 @@ export async function createApp(options = {}) {
 
   app.setErrorHandler((error, request, reply) => {
     const status = error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 500;
-    if (status === 500) request.log.error({ err: error }, 'request failed');
+    if (status === 500) request.log.error(safeErrorSummary(error), 'request failed');
     reply.code(status).send({ error: status === 500 ? 'internal_error' : (error.code ?? 'invalid_request'), requestId: request.id });
   });
   app.addHook('onSend', async (request, reply) => {
@@ -497,6 +499,7 @@ export async function createApp(options = {}) {
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
   registerInvitationRoutes(app,{db,auth,owner,object});
+  registerSearchRoutes(app,{db,auth});
   registerTaxCalendarRoutes(app,{db,auth,access,command,object,pageLimit});
   registerPayrollRoutes(app,{db,auth,access,command,object,pageLimit});
   registerEmployeeRoutes(app,{db,auth,access,command,pageLimit,object});

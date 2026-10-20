@@ -1,3 +1,6 @@
+import 'workspace/company_search.dart';
+import 'workspace/commercial_detail.dart';
+import 'workspace/counterparty_workspace.dart';
 import 'workspace/tax_calendar_workspace.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -966,6 +969,138 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     );
   }
 
+  Future<void> companySearch() async {
+    final selectedCompany = company;
+    if (selectedCompany == null) {
+      return;
+    }
+    final result = await showDialog<Map<String, dynamic>>(
+      context: navigator.currentContext!,
+      builder: (_) =>
+          CompanySearchDialog(api: api, companyId: selectedCompany.id),
+    );
+    if (result == null || !mounted || company?.id != selectedCompany.id) {
+      return;
+    }
+    final id = result['id'] as String, kind = result['kind'] as String;
+    final base = ['v1', 'companies', selectedCompany.id];
+    if (kind == 'PROJECT') {
+      await perform(() async {
+        selected = id;
+        section = 'projects';
+        await refresh();
+      });
+      return;
+    }
+    Map<String, dynamic>? entity;
+    ResourceDto? resource;
+    if (!['GOODS', 'ASSET'].contains(kind)) {
+      await perform(() async {
+        if (['SALE_INVOICE', 'SALE_ACT', 'PURCHASE_ACT'].contains(kind)) {
+          entity = jsonObject(
+            await api.request('GET', [...base, 'commercial-documents', id]),
+          );
+        } else if (kind == 'EMPLOYEE') {
+          entity = jsonObject(
+            await api.request('GET', [...base, 'employees', id]),
+          );
+        } else {
+          resource = ResourceDto.fromJson(
+            await api.request('GET', [...base, 'resources', kind, id]),
+          );
+        }
+      });
+      if (entity == null && resource == null) {
+        return;
+      }
+    }
+    if (!mounted || company?.id != selectedCompany.id) {
+      return;
+    }
+    if (['SALE_INVOICE', 'SALE_ACT', 'PURCHASE_ACT'].contains(kind)) {
+      await showDialog<void>(
+        context: navigator.currentContext!,
+        barrierDismissible: false,
+        builder: (_) => CommercialDetail(
+          api: api,
+          companyId: selectedCompany.id,
+          currency: selectedCompany.currency,
+          document: entity!,
+          projects: projects,
+          onChanged: refresh,
+        ),
+      );
+    } else if (kind == 'GOODS') {
+      await showGoodsOrder(
+        navigator.currentContext!,
+        api: api,
+        companyId: selectedCompany.id,
+        orderId: id,
+        currency: selectedCompany.currency,
+        projects: projects,
+        onChanged: refresh,
+      );
+    } else if (kind == 'ASSET') {
+      await showAssetDetails(
+        navigator.currentContext!,
+        api: api,
+        companyId: selectedCompany.id,
+        assetId: id,
+        currency: selectedCompany.currency,
+        projects: projects,
+        onChanged: refresh,
+      );
+    } else if (kind == 'EMPLOYEE') {
+      await showDialog<bool>(
+        context: navigator.currentContext!,
+        barrierDismissible: false,
+        builder: (_) => EmployeeEditor(
+          api: api,
+          companyId: selectedCompany.id,
+          currency: selectedCompany.currency,
+          projects: projects,
+          employee: entity,
+        ),
+      );
+    } else if (['clients', 'suppliers'].contains(kind) &&
+        can('documents.read') &&
+        can('accounting.read')) {
+      await navigator.currentState!.push<void>(
+        MaterialPageRoute(
+          builder: (_) => CounterpartyWorkspace(
+            api: api,
+            companyId: selectedCompany.id,
+            kind: kind,
+            party: resource!,
+            currency: selectedCompany.currency,
+            projects: projects,
+            onChanged: refresh,
+          ),
+        ),
+      );
+    } else {
+      await showCatalogResource(
+        navigator.currentContext!,
+        api: api,
+        companyId: selectedCompany.id,
+        kind: kind,
+        resource: resource!,
+      );
+    }
+    if (mounted && company?.id == selectedCompany.id) {
+      await perform(refresh);
+    }
+  }
+
+  Widget searchButton() => Tooltip(
+    message: 'Поиск по фирме',
+    child: OutlinedButton.icon(
+      onPressed: busy ? null : companySearch,
+      icon: const Icon(Icons.search),
+      label: const Text('Поиск по фирме'),
+    ),
+  );
+
   Widget navigation() => Container(
     width: 222,
     color: Colors.white,
@@ -1168,6 +1303,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                                   }),
                           ),
                         ),
+                      searchButton(),
                       IconButton(
                         tooltip: 'Обновить доступ и данные',
                         onPressed: busy ? null : () => perform(refreshAccess),
@@ -1377,51 +1513,65 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                 spacing: 16,
                 runSpacing: 16,
                 children: [
-                  DropdownButton<String>(
-                    value: company!.id,
-                    items: companies
-                        .map(
-                          (c) => DropdownMenuItem(
-                            value: c.id,
-                            child: Text(c.name),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: busy
-                        ? null
-                        : (id) => perform(() async {
-                            company = companies.firstWhere((c) => c.id == id);
-                            selected = null;
-                            report = null;
-                            await refresh();
-                          }),
+                  SizedBox(
+                    width: size.maxWidth < 600 ? size.maxWidth - 40 : 350,
+                    child: DropdownButton<String>(
+                      value: company!.id,
+                      isExpanded: true,
+                      items: companies
+                          .map(
+                            (c) => DropdownMenuItem(
+                              value: c.id,
+                              child: Text(
+                                c.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: busy
+                          ? null
+                          : (id) => perform(() async {
+                              company = companies.firstWhere((c) => c.id == id);
+                              selected = null;
+                              report = null;
+                              await refresh();
+                            }),
+                    ),
                   ),
-                  DropdownButton<String>(
-                    value: selected ?? 'all',
-                    items: [
-                      const DropdownMenuItem(
-                        value: 'all',
-                        child: Text('Вся фирма'),
-                      ),
-                      const DropdownMenuItem(
-                        value: 'unassigned',
-                        child: Text('Общие операции'),
-                      ),
-                      ...projects.map(
-                        (p) => DropdownMenuItem(
-                          value: p['id'] as String,
-                          child: Text(
-                            '${p['name']}${p['archived'] == true ? ' · архив' : ''}',
+                  SizedBox(
+                    width: size.maxWidth < 600 ? size.maxWidth - 40 : 220,
+                    child: DropdownButton<String>(
+                      value: selected ?? 'all',
+                      isExpanded: true,
+                      items: [
+                        const DropdownMenuItem(
+                          value: 'all',
+                          child: Text('Вся фирма'),
+                        ),
+                        const DropdownMenuItem(
+                          value: 'unassigned',
+                          child: Text('Общие операции'),
+                        ),
+                        ...projects.map(
+                          (p) => DropdownMenuItem(
+                            value: p['id'] as String,
+                            child: Text(
+                              '${p['name']}${p['archived'] == true ? ' · архив' : ''}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                    onChanged: busy
-                        ? null
-                        : (id) => perform(() async {
-                            selected = id == 'all' ? null : id;
-                            await refresh();
-                          }),
+                      ],
+                      onChanged: busy
+                          ? null
+                          : (id) => perform(() async {
+                              selected = id == 'all' ? null : id;
+                              await refresh();
+                            }),
+                    ),
                   ),
                   FilledButton.icon(
                     onPressed: busy || !can('wallets.transact')
@@ -1446,6 +1596,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                     icon: const Icon(Icons.receipt_long_outlined),
                     label: const Text('Операции'),
                   ),
+                  searchButton(),
                   IconButton(
                     tooltip: 'Мой аккаунт',
                     onPressed: busy ? null : account,

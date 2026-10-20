@@ -25,6 +25,7 @@ const available = [
   "test_live/goods_workspace_test.dart",
   "test_live/payroll_workspace_test.dart",
   "test_live/tax_calendar_workspace_test.dart",
+  "test_live/company_search_test.dart",
 ];
 const requested = process.argv.slice(2);
 if (requested.some((file) => !available.includes(file)))
@@ -105,14 +106,45 @@ for (const file of files) {
       {
         cwd: root,
         env: { ...process.env, MUCHET_TEST_FIXTURE: fixture },
-        stdio: "inherit",
+        stdio: ["ignore", "pipe", "inherit"],
+        detached: process.platform !== "win32",
       },
     );
-    const code = await new Promise((done, reject) => {
-      child.once("error", reject);
-      child.once("exit", done);
+    let tail = "",
+      timedOut = false,
+      forceStop;
+    child.stdout.on("data", (chunk) => {
+      process.stdout.write(chunk);
+      tail = (tail + chunk.toString("utf8")).slice(-65536);
     });
-    if (code !== 0) failed.push(file);
+    const stop = (signal) => {
+      try {
+        if (process.platform === "win32") child.kill(signal);
+        else process.kill(-child.pid, signal);
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    };
+    const watchdog = setTimeout(() => {
+      timedOut = true;
+      stop("SIGINT");
+      forceStop = setTimeout(() => stop("SIGKILL"), 5000);
+      forceStop.unref();
+    }, 180000);
+    watchdog.unref();
+    let code;
+    try {
+      code = await new Promise((done, reject) => {
+        child.once("error", reject);
+        child.once("exit", done);
+      });
+    } finally {
+      clearTimeout(watchdog);
+      if (forceStop) clearTimeout(forceStop);
+    }
+    // Flutter can exit0 after an interrupted test. Require its completed result.
+    if (code !== 0 || timedOut || !tail.includes("All tests passed!"))
+      failed.push(file);
   } catch (error) {
     failed.push(file);
     console.error(error.message);

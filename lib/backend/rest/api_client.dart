@@ -122,6 +122,7 @@ class BackendException implements Exception {
       'calendar_task_not_found': 'Задача не найдена в этой фирме.',
       'calendar_date_confirmation_required':
           'Подтвердите проверку даты и применимости срока.',
+      'invalid_search': 'Введите от2 до160 символов для поиска.',
       'invalid_calendar_task': 'Проверьте поля задачи и её статус.',
       'invalid_preparation': 'Проверьте отметки подготовки.',
       'company_profile_incomplete':

@@ -241,12 +241,14 @@ class _TaxCalendarWorkspaceState extends State<TaxCalendarWorkspace> {
       children: [
         heading('Подготовка к отчётности'),
         const SizedBox(height: 16),
-        const Text(
-          'Отметки фиксируют вашу проверку. Они не формируют декларацию и не заменяют контрольные соотношения официальной формы.',
-        ),
+        const SizedBox(height: 12),
         CheckboxListTile(
+          controlAffinity: ListTileControlAffinity.leading,
           contentPadding: EdgeInsets.zero,
-          title: const Text('Проверить профиль компании'),
+          title: const Text(
+            'Проверить профиль компании',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
           subtitle: Text(
             preparation['profileCurrent'] == true
                 ? 'Реквизиты текущей версии'
@@ -257,18 +259,28 @@ class _TaxCalendarWorkspaceState extends State<TaxCalendarWorkspace> {
               ? null
               : (v) => setState(() => profile = v!),
         ),
+        const SizedBox(height: 12),
         CheckboxListTile(
+          controlAffinity: ListTileControlAffinity.leading,
           contentPadding: EdgeInsets.zero,
-          title: const Text('Собрать документы за период'),
+          title: const Text(
+            'Собрать документы за период',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
           subtitle: const Text('Документы, оплаты и начисления'),
           value: documents,
           onChanged: !canWrite || busy || pending != null
               ? null
               : (v) => setState(() => documents = v!),
         ),
+        const SizedBox(height: 12),
         CheckboxListTile(
+          controlAffinity: ListTileControlAffinity.leading,
           contentPadding: EdgeInsets.zero,
-          title: const Text('Проверить контрольные соотношения'),
+          title: const Text(
+            'Проверить контрольные соотношения',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
           subtitle: const Text(
             'Подтверждение вашей проверки перед подготовкой отчёта',
           ),
@@ -283,15 +295,99 @@ class _TaxCalendarWorkspaceState extends State<TaxCalendarWorkspace> {
           ),
         const SizedBox(height: 16),
         if (canWrite)
-          FilledButton(
-            onPressed: busy ? null : savePreparation,
-            child: Text(
-              pending == null ? 'Сохранить подготовку' : 'Повторить сохранение',
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: busy ? null : savePreparation,
+              child: Text(
+                pending == null
+                    ? 'Сохранить подготовку'
+                    : 'Повторить сохранение',
+              ),
             ),
           ),
       ],
     ),
   );
+  Widget get deadlineOverview => card(
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        heading('Ничего не пропустим'),
+        const SizedBox(height: 32),
+        const Text(
+          'Официальные сроки',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
+        const SizedBox(height: 12),
+        const Text('Автоматически ещё не загружены'),
+        const SizedBox(height: 32),
+        const Text(
+          'Добавляйте задачи с проверенной датой и основанием. Они сохраняются в общем календаре фирмы.',
+        ),
+        const SizedBox(height: 32),
+        Text('Открыто задач: ${counts['open'] ?? 0}'),
+        const SizedBox(height: 8),
+        Text('Просрочено: ${counts['overdue'] ?? 0}'),
+        const SizedBox(height: 24),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF4DD),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Text(
+            'Даты подтверждаются вручную',
+            style: TextStyle(fontSize: 11),
+          ),
+        ),
+      ],
+    ),
+  );
+  Widget get preparationOverview => LayoutBuilder(
+    builder: (context, size) => size.maxWidth >= 900
+        ? Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 2, child: preparationCard),
+              const SizedBox(width: 24),
+              Expanded(child: deadlineOverview),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              preparationCard,
+              const SizedBox(height: 24),
+              deadlineOverview,
+            ],
+          ),
+  );
+  Widget tabButton(String label, int value) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      TextButton(
+        onPressed: () => setState(() => tab = value),
+        style: TextButton.styleFrom(
+          foregroundColor: tab == value
+              ? const Color(0xFF5B4FF5)
+              : const Color(0xFF65728D),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontWeight: tab == value ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+      Container(
+        width: 86,
+        height: 3,
+        color: tab == value ? const Color(0xFF5B4FF5) : Colors.transparent,
+      ),
+    ],
+  );
+
   Widget get taskList => card(
     Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -458,14 +554,8 @@ class _TaxCalendarWorkspaceState extends State<TaxCalendarWorkspace> {
         Wrap(
           spacing: 12,
           children: [
-            TextButton(
-              onPressed: () => setState(() => tab = 0),
-              child: const Text('Задачи'),
-            ),
-            TextButton(
-              onPressed: () => setState(() => tab = 1),
-              child: const Text('Календарь'),
-            ),
+            tabButton('Задачи', 0),
+            tabButton('Календарь', 1),
             if (canProfile)
               TextButton(
                 onPressed: widget.onProfile,
@@ -490,7 +580,7 @@ class _TaxCalendarWorkspaceState extends State<TaxCalendarWorkspace> {
           ),
         ),
         const SizedBox(height: 24),
-        if (tab == 0 && canProfile) preparationCard,
+        if (tab == 0 && canProfile) preparationOverview,
         if (tab == 1 && RegExp(r'^\d{4}-(0[1-9]|1[0-2])$').hasMatch(month.text))
           calendar,
         const SizedBox(height: 24),
