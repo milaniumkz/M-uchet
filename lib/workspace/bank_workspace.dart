@@ -644,132 +644,138 @@ class _BankUploadState extends State<BankUpload> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Загрузить банковскую выписку'),
-    content: SizedBox(
-      width: 700,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'CSV в UTF-8, до 500 операций. Нужен уникальный идентификатор банковской операции, а не повторяющийся номер платёжного поручения. В выписке списание и поступление — отдельные колонки. Суммы в тенге с точностью до 0,01.',
-            ),
-            const SizedBox(height: 18),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: walletId,
-              items: widget.wallets
-                  .map(
-                    (w) => DropdownMenuItem(
-                      value: w['id'] as String,
-                      child: Text(w['name'] as String),
-                    ),
-                  )
-                  .toList(),
-              onChanged: busy || pending != null
-                  ? null
-                  : (v) => setState(() {
-                      walletId = v;
-                      preview = null;
-                    }),
-              decoration: const InputDecoration(labelText: 'Денежный счёт'),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: busy || pending != null ? null : pick,
-              icon: const Icon(Icons.attach_file),
-              label: Text(fileName.isEmpty ? 'Выбрать CSV' : fileName),
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: delimiter,
-              items: const [
-                DropdownMenuItem(value: ';', child: Text('Точка с запятой')),
-                DropdownMenuItem(value: ',', child: Text('Запятая')),
-                DropdownMenuItem(value: '\t', child: Text('Табуляция')),
-              ],
-              onChanged: busy || pending != null
-                  ? null
-                  : (v) => setState(() {
-                      delimiter = v!;
-                      preview = null;
-                    }),
-              decoration: const InputDecoration(labelText: 'Разделитель'),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: mapping,
-              enabled: !busy && pending == null,
-              decoration: const InputDecoration(
-                labelText: 'Названия колонок в CSV',
-                helperText:
-                    'Дата, ID операции, списание, поступление, назначение, контрагент',
-                helperMaxLines: 3,
+  Widget build(BuildContext context) => PopScope(
+    canPop: pending == null,
+    child: AlertDialog(
+      title: const Text('Загрузить банковскую выписку'),
+      content: SizedBox(
+        width: 700,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'CSV в UTF-8, до 500 операций. Нужен уникальный идентификатор банковской операции, а не повторяющийся номер платёжного поручения. В выписке списание и поступление — отдельные колонки. Суммы в тенге с точностью до 0,01.',
               ),
-              onChanged: (_) => setState(() => preview = null),
-            ),
-            if (error != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            if (preview != null) ...[
               const SizedBox(height: 18),
-              Text(
-                '${preview!.length} строк · ${preview!.where((r) => r['duplicate'] == true).length} дублей не будут загружены',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              ...preview!
-                  .take(8)
-                  .map(
-                    (row) => ListTile(
-                      dense: true,
-                      title: Text(
-                        '${row['businessDate']} · ${row['externalId']}',
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: walletId,
+                items: widget.wallets
+                    .map(
+                      (w) => DropdownMenuItem(
+                        value: w['id'] as String,
+                        child: Text(w['name'] as String),
                       ),
-                      subtitle: Text(row['description'] as String),
-                      trailing: Text(
-                        row['duplicate'] == true
-                            ? 'Дубль'
-                            : moneyText(row['amount'] as num, 'KZT'),
+                    )
+                    .toList(),
+                onChanged: busy || pending != null
+                    ? null
+                    : (v) => setState(() {
+                        walletId = v;
+                        preview = null;
+                      }),
+                decoration: const InputDecoration(labelText: 'Денежный счёт'),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: busy || pending != null ? null : pick,
+                icon: const Icon(Icons.attach_file),
+                label: Text(fileName.isEmpty ? 'Выбрать CSV' : fileName),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: delimiter,
+                items: const [
+                  DropdownMenuItem(value: ';', child: Text('Точка с запятой')),
+                  DropdownMenuItem(value: ',', child: Text('Запятая')),
+                  DropdownMenuItem(value: '\t', child: Text('Табуляция')),
+                ],
+                onChanged: busy || pending != null
+                    ? null
+                    : (v) => setState(() {
+                        delimiter = v!;
+                        preview = null;
+                      }),
+                decoration: const InputDecoration(labelText: 'Разделитель'),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: mapping,
+                enabled: !busy && pending == null,
+                decoration: const InputDecoration(
+                  labelText: 'Названия колонок в CSV',
+                  helperText:
+                      'Дата, ID операции, списание, поступление, назначение, контрагент',
+                  helperMaxLines: 3,
+                ),
+                onChanged: (_) => setState(() => preview = null),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              if (preview != null) ...[
+                const SizedBox(height: 18),
+                Text(
+                  '${preview!.length} строк · ${preview!.where((r) => r['duplicate'] == true).length} дублей не будут загружены',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                ...preview!
+                    .take(8)
+                    .map(
+                      (row) => ListTile(
+                        dense: true,
+                        title: Text(
+                          '${row['businessDate']} · ${row['externalId']}',
+                        ),
+                        subtitle: Text(row['description'] as String),
+                        trailing: Text(
+                          row['duplicate'] == true
+                              ? 'Дубль'
+                              : moneyText(row['amount'] as num, 'KZT'),
+                        ),
                       ),
                     ),
+                if (preview!.length > 8)
+                  const Text(
+                    'Показаны первые восемь строк. Все операции доступны после загрузки.',
                   ),
-              if (preview!.length > 8)
+              ],
+              if (pending != null)
                 const Text(
-                  'Показаны первые восемь строк. Все операции доступны после загрузки.',
+                  'При сетевом сбое повторите загрузку: используется тот же ключ операции.',
                 ),
             ],
-            if (pending != null)
-              const Text(
-                'При сетевом сбое повторите загрузку: используется тот же ключ операции.',
-              ),
-          ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: busy || pending != null
+              ? null
+              : () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+        OutlinedButton(
+          onPressed: busy || csv.isEmpty || pending != null ? null : check,
+          child: const Text('Проверить файл'),
+        ),
+        FilledButton(
+          onPressed: busy || preview == null ? null : save,
+          child: Text(
+            pending == null
+                ? 'Загрузить для сопоставления'
+                : 'Повторить загрузку',
+          ),
+        ),
+      ],
     ),
-    actions: [
-      TextButton(
-        onPressed: busy || pending != null
-            ? null
-            : () => Navigator.pop(context),
-        child: const Text('Отмена'),
-      ),
-      OutlinedButton(
-        onPressed: busy || csv.isEmpty || pending != null ? null : check,
-        child: const Text('Проверить файл'),
-      ),
-      FilledButton(
-        onPressed: busy || preview == null ? null : save,
-        child: Text(
-          pending == null
-              ? 'Загрузить для сопоставления'
-              : 'Повторить загрузку',
-        ),
-      ),
-    ],
   );
 }
 
@@ -920,162 +926,172 @@ class _BankReviewState extends State<BankReview> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Сопоставить операцию'),
-    content: SizedBox(
-      width: 600,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(widget.row['description'] as String),
-            const SizedBox(height: 18),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: classification,
-              decoration: const InputDecoration(labelText: 'Вид операции'),
-              items: bankCategories.entries
-                  .where(
-                    (e) =>
-                        e.key == 'DOCUMENT' ||
-                        e.key == 'EXISTING' ||
-                        e.key == 'IGNORE' ||
-                        ((widget.row['amount'] as num) > 0
-                            ? e.key != 'EXPENSE'
-                            : e.key == 'EXPENSE'),
-                  )
-                  .map(
-                    (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
-                  )
-                  .toList(),
-              onChanged: busy || pending != null
-                  ? null
-                  : (v) {
-                      setState(() => classification = v);
-                      if (v == 'EXISTING') {
-                        findCandidates();
-                      }
-                      if (v == 'DOCUMENT') {
-                        findDocuments();
-                      }
-                    },
-            ),
-            const SizedBox(height: 16),
-            if (!['DOCUMENT', 'EXISTING'].contains(classification))
+  Widget build(BuildContext context) => PopScope(
+    canPop: pending == null,
+    child: AlertDialog(
+      title: const Text('Сопоставить операцию'),
+      content: SizedBox(
+        width: 600,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(widget.row['description'] as String),
+              const SizedBox(height: 18),
               DropdownButtonFormField<String>(
                 isExpanded: true,
-                initialValue: projectId ?? 'unassigned',
-                decoration: const InputDecoration(labelText: 'Проект'),
-                items: [
-                  const DropdownMenuItem(
-                    value: 'unassigned',
-                    child: Text('Общие операции фирмы'),
-                  ),
-                  ...widget.projects.map(
-                    (p) => DropdownMenuItem(
-                      value: p['id'] as String,
-                      child: Text(p['name'] as String),
-                    ),
-                  ),
-                ],
+                initialValue: classification,
+                decoration: const InputDecoration(labelText: 'Вид операции'),
+                items: bankCategories.entries
+                    .where(
+                      (e) =>
+                          e.key == 'DOCUMENT' ||
+                          e.key == 'EXISTING' ||
+                          e.key == 'IGNORE' ||
+                          ((widget.row['amount'] as num) > 0
+                              ? e.key != 'EXPENSE'
+                              : e.key == 'EXPENSE'),
+                    )
+                    .map(
+                      (e) =>
+                          DropdownMenuItem(value: e.key, child: Text(e.value)),
+                    )
+                    .toList(),
                 onChanged: busy || pending != null
                     ? null
-                    : (v) => setState(
-                        () => projectId = v == 'unassigned' ? null : v,
+                    : (v) {
+                        setState(() => classification = v);
+                        if (v == 'EXISTING') {
+                          findCandidates();
+                        }
+                        if (v == 'DOCUMENT') {
+                          findDocuments();
+                        }
+                      },
+              ),
+              const SizedBox(height: 16),
+              if (!['DOCUMENT', 'EXISTING'].contains(classification))
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: projectId ?? 'unassigned',
+                  decoration: const InputDecoration(labelText: 'Проект'),
+                  items: [
+                    const DropdownMenuItem(
+                      value: 'unassigned',
+                      child: Text('Общие операции фирмы'),
+                    ),
+                    ...projectChoices(widget.projects, projectId).map(
+                      (p) => DropdownMenuItem(
+                        value: p['id'] as String,
+                        child: Text(p['name'] as String),
                       ),
-              ),
-            if (classification == 'EXISTING') ...[
-              const Text(
-                'Выберите уже внесённое движение с тем же счётом, датой и суммой. Новые проводки и оплаты не создаются.',
-              ),
-              TextButton(
-                onPressed: busy || pending != null ? null : findCandidates,
-                child: const Text('Обновить подходящие операции'),
-              ),
-              if (candidates.isEmpty && !busy)
-                const Text('Подходящих несопоставленных операций нет.'),
-              ...candidates.map(
-                (e) => ListTile(
-                  selected: entryId == e['id'],
-                  leading: Icon(
-                    entryId == e['id']
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                  ),
-                  title: Text(e['description'] as String),
-                  subtitle: Text(
-                    '${e['business_date']} · ${moneyText(e['amount'] as num, 'KZT')}',
-                  ),
-                  onTap: busy || pending != null
+                    ),
+                  ],
+                  onChanged: busy || pending != null
                       ? null
-                      : () => setState(() => entryId = e['id'] as String),
+                      : (v) => setState(
+                          () => projectId = v == 'unassigned' ? null : v,
+                        ),
                 ),
-              ),
+              if (classification == 'EXISTING') ...[
+                const Text(
+                  'Выберите уже внесённое движение с тем же счётом, датой и суммой. Новые проводки и оплаты не создаются.',
+                ),
+                TextButton(
+                  onPressed: busy || pending != null ? null : findCandidates,
+                  child: const Text('Обновить подходящие операции'),
+                ),
+                if (candidates.isEmpty && !busy)
+                  const Text('Подходящих несопоставленных операций нет.'),
+                ...candidates.map(
+                  (e) => ListTile(
+                    selected: entryId == e['id'],
+                    leading: Icon(
+                      entryId == e['id']
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                    ),
+                    title: Text(e['description'] as String),
+                    subtitle: Text(
+                      '${e['business_date']} · ${moneyText(e['amount'] as num, 'KZT')}',
+                    ),
+                    onTap: busy || pending != null
+                        ? null
+                        : () => setState(() => entryId = e['id'] as String),
+                  ),
+                ),
+              ],
+              if (classification == 'DOCUMENT') ...[
+                TextField(
+                  controller: search,
+                  enabled: !busy && pending == null,
+                  decoration: const InputDecoration(
+                    labelText: 'Номер документа или контрагент',
+                  ),
+                  onSubmitted: (_) => findDocuments(),
+                ),
+                TextButton(
+                  onPressed: busy || pending != null ? null : findDocuments,
+                  child: const Text('Найти документы'),
+                ),
+                const Text(
+                  'Проект берётся из выбранного документа. Проверьте контрагента и сумму перед проведением.',
+                ),
+                ...documents.map(
+                  (doc) => ListTile(
+                    selected: documentId == doc['id'],
+                    leading: Icon(
+                      documentId == doc['id']
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                    ),
+                    onTap: busy || pending != null
+                        ? null
+                        : () =>
+                              setState(() => documentId = doc['id'] as String),
+                    title: Text(
+                      '${doc['number']} · ${jsonObject(jsonObject(doc['data'])['counterparty'])['name']}',
+                    ),
+                    subtitle: Text(
+                      'Остаток ${moneyText(doc['outstanding'] as num, 'KZT')}',
+                    ),
+                  ),
+                ),
+              ],
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
             ],
-            if (classification == 'DOCUMENT') ...[
-              TextField(
-                controller: search,
-                enabled: !busy && pending == null,
-                decoration: const InputDecoration(
-                  labelText: 'Номер документа или контрагент',
-                ),
-                onSubmitted: (_) => findDocuments(),
-              ),
-              TextButton(
-                onPressed: busy || pending != null ? null : findDocuments,
-                child: const Text('Найти документы'),
-              ),
-              const Text(
-                'Проект берётся из выбранного документа. Проверьте контрагента и сумму перед проведением.',
-              ),
-              ...documents.map(
-                (doc) => ListTile(
-                  selected: documentId == doc['id'],
-                  leading: Icon(
-                    documentId == doc['id']
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                  ),
-                  onTap: busy || pending != null
-                      ? null
-                      : () => setState(() => documentId = doc['id'] as String),
-                  title: Text(
-                    '${doc['number']} · ${jsonObject(jsonObject(doc['data'])['counterparty'])['name']}',
-                  ),
-                  subtitle: Text(
-                    'Остаток ${moneyText(doc['outstanding'] as num, 'KZT')}',
-                  ),
-                ),
-              ),
-            ],
-            if (error != null)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-          ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: busy || pending != null
+              ? null
+              : () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed:
+              busy ||
+                  classification == null ||
+                  (classification == 'DOCUMENT' && documentId == null) ||
+                  (classification == 'EXISTING' && entryId == null)
+              ? null
+              : save,
+          child: Text(
+            pending == null
+                ? 'Сохранить сопоставление'
+                : 'Повторить сохранение',
+          ),
+        ),
+      ],
     ),
-    actions: [
-      TextButton(
-        onPressed: busy || pending != null
-            ? null
-            : () => Navigator.pop(context),
-        child: const Text('Отмена'),
-      ),
-      FilledButton(
-        onPressed:
-            busy ||
-                classification == null ||
-                (classification == 'DOCUMENT' && documentId == null) ||
-                (classification == 'EXISTING' && entryId == null)
-            ? null
-            : save,
-        child: Text(
-          pending == null ? 'Сохранить сопоставление' : 'Повторить сохранение',
-        ),
-      ),
-    ],
   );
 }

@@ -107,7 +107,9 @@ class _EmployeesWorkspaceState extends State<EmployeesWorkspace> {
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
           ),
           FilledButton.icon(
-            onPressed: busy||!hasCompanyPermission(context,'employees.write') ? null : () => edit(),
+            onPressed: busy || !hasCompanyPermission(context, 'employees.write')
+                ? null
+                : () => edit(),
             icon: const Icon(Icons.person_add_outlined),
             label: const Text('Добавить сотрудника'),
           ),
@@ -324,119 +326,142 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
         padding: const EdgeInsets.only(bottom: 14),
         child: TextField(
           controller: c,
-          enabled: !busy && pending == null && hasCompanyPermission(context,'employees.write'),
+          enabled:
+              !busy &&
+              pending == null &&
+              hasCompanyPermission(context, 'employees.write'),
           autocorrect: !private,
           enableSuggestions: !private,
           decoration: InputDecoration(labelText: label),
         ),
       );
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      widget.employee == null ? 'Добавить сотрудника' : 'Карточка сотрудника',
-    ),
-    content: SizedBox(
-      width: 700,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            field(name, 'ФИО'),
-            field(identifier, 'ИИН, 12 цифр', private: true),
-            field(job, 'Должность'),
-            field(hire, 'Дата приёма YYYY-MM-DD'),
-            field(birth, 'Дата рождения YYYY-MM-DD'),
-            field(termination, 'Дата увольнения YYYY-MM-DD, если есть'),
-            field(gross, 'Оклад до удержаний, ${widget.currency}'),
-            field(citizenship, 'Гражданство: код страны'),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: status,
-              decoration: const InputDecoration(labelText: 'Статус'),
-              items: const [
-                DropdownMenuItem(value: 'ACTIVE', child: Text('Работает')),
-                DropdownMenuItem(value: 'INACTIVE', child: Text('Неактивен')),
-              ],
-              onChanged: busy || pending != null || !hasCompanyPermission(context,'employees.write')
-                  ? null
-                  : (v) => setState(() => status = v!),
-            ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: projectId ?? 'unassigned',
-              decoration: const InputDecoration(
-                labelText: 'Основной проект для затрат',
+  Widget build(BuildContext context) => PopScope(
+    canPop: pending == null,
+    child: AlertDialog(
+      title: Text(
+        widget.employee == null ? 'Добавить сотрудника' : 'Карточка сотрудника',
+      ),
+      content: SizedBox(
+        width: 700,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              field(name, 'ФИО'),
+              field(identifier, 'ИИН, 12 цифр', private: true),
+              field(job, 'Должность'),
+              field(hire, 'Дата приёма YYYY-MM-DD'),
+              field(birth, 'Дата рождения YYYY-MM-DD'),
+              field(termination, 'Дата увольнения YYYY-MM-DD, если есть'),
+              field(gross, 'Оклад до удержаний, ${widget.currency}'),
+              field(citizenship, 'Гражданство: код страны'),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: status,
+                decoration: const InputDecoration(labelText: 'Статус'),
+                items: const [
+                  DropdownMenuItem(value: 'ACTIVE', child: Text('Работает')),
+                  DropdownMenuItem(value: 'INACTIVE', child: Text('Неактивен')),
+                ],
+                onChanged:
+                    busy ||
+                        pending != null ||
+                        !hasCompanyPermission(context, 'employees.write')
+                    ? null
+                    : (v) => setState(() => status = v!),
               ),
-              items: [
-                const DropdownMenuItem(
-                  value: 'unassigned',
-                  child: Text('Общие операции фирмы'),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: projectId ?? 'unassigned',
+                decoration: const InputDecoration(
+                  labelText: 'Основной проект для затрат',
                 ),
-                ...widget.projects.map(
-                  (p) => DropdownMenuItem(
-                    value: p['id'] as String,
-                    child: Text(p['name'] as String),
+                items: [
+                  const DropdownMenuItem(
+                    value: 'unassigned',
+                    child: Text('Общие операции фирмы'),
+                  ),
+                  ...projectChoices(widget.projects, projectId).map(
+                    (p) => DropdownMenuItem(
+                      value: p['id'] as String,
+                      child: Text(p['name'] as String),
+                    ),
+                  ),
+                ],
+                onChanged:
+                    busy ||
+                        pending != null ||
+                        !hasCompanyPermission(context, 'employees.write')
+                    ? null
+                    : (v) => setState(
+                        () => projectId = v == 'unassigned' ? null : v,
+                      ),
+              ),
+              CheckboxListTile(
+                value: resident,
+                onChanged:
+                    busy ||
+                        pending != null ||
+                        !hasCompanyPermission(context, 'employees.write')
+                    ? null
+                    : (v) => setState(() => resident = v!),
+                title: const Text('Налоговый резидент Казахстана'),
+              ),
+              CheckboxListTile(
+                value: declaration,
+                onChanged:
+                    busy ||
+                        pending != null ||
+                        !hasCompanyPermission(context, 'employees.write')
+                    ? null
+                    : (v) => setState(() => declaration = v!),
+                title: const Text(
+                  'Есть заявление на базовый налоговый вычет у этого работодателя',
+                ),
+              ),
+              field(notes, 'Заметки'),
+              if (widget.employee != null) ...[
+                Text('История изменений: ${history.length}'),
+                ...history.map(
+                  (h) => Text(
+                    '${h['changed_at']} · версия ${jsonObject(h['snapshot'])['version']}',
                   ),
                 ),
               ],
-              onChanged: busy || pending != null || !hasCompanyPermission(context,'employees.write')
-                  ? null
-                  : (v) => setState(
-                      () => projectId = v == 'unassigned' ? null : v,
-                    ),
-            ),
-            CheckboxListTile(
-              value: resident,
-              onChanged: busy || pending != null || !hasCompanyPermission(context,'employees.write')
-                  ? null
-                  : (v) => setState(() => resident = v!),
-              title: const Text('Налоговый резидент Казахстана'),
-            ),
-            CheckboxListTile(
-              value: declaration,
-              onChanged: busy || pending != null || !hasCompanyPermission(context,'employees.write')
-                  ? null
-                  : (v) => setState(() => declaration = v!),
-              title: const Text(
-                'Есть заявление на базовый налоговый вычет у этого работодателя',
-              ),
-            ),
-            field(notes, 'Заметки'),
-            if (widget.employee != null) ...[
-              Text('История изменений: ${history.length}'),
-              ...history.map(
-                (h) => Text(
-                  '${h['changed_at']} · версия ${jsonObject(h['snapshot'])['version']}',
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
                 ),
-              ),
+              if (pending != null)
+                const Text(
+                  'Повтор сохранения использует исходные данные и тот же ключ операции.',
+                ),
             ],
-            if (error != null)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            if (pending != null)
-              const Text(
-                'Повтор сохранения использует исходные данные и тот же ключ операции.',
-              ),
-          ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: busy || pending != null
+              ? null
+              : () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: busy || !hasCompanyPermission(context, 'employees.write')
+              ? null
+              : save,
+          child: Text(
+            pending == null ? 'Сохранить сотрудника' : 'Повторить сохранение',
+          ),
+        ),
+      ],
     ),
-    actions: [
-      TextButton(
-        onPressed: busy || pending != null
-            ? null
-            : () => Navigator.pop(context),
-        child: const Text('Отмена'),
-      ),
-      FilledButton(
-        onPressed: busy||!hasCompanyPermission(context,'employees.write') ? null : save,
-        child: Text(
-          pending == null ? 'Сохранить сотрудника' : 'Повторить сохранение',
-        ),
-      ),
-    ],
   );
 }

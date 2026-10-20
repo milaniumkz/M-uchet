@@ -48,6 +48,11 @@ class BackendException implements Exception {
           'Приглашение недействительно, отозвано или срок его действия истёк.',
       'invitation_access_revoked': 'Доступ по этому приглашению уже отозван.',
       'invalid_credentials': 'Неверный логин или пароль.',
+      'current_password_incorrect': 'Текущий пароль указан неверно.',
+      'bank_existing_entry_mismatch':
+          'Выбранная операция изменилась: счёт, дата и сумма должны совпадать с выпиской.',
+      'bank_entry_already_matched':
+          'Это движение уже сопоставлено с другой строкой выписки.',
       'asset_policy_required':
           'Укажите линейный метод и подтвердите параметры учётной политики.',
       'asset_number_conflict':

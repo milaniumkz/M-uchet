@@ -58,6 +58,9 @@ test('credentials, logout and password changes invalidate sessions', async t => 
   const f = await fixture(t);
   const bad = await f.call('POST', '/v1/auth/login', { login: f.owner.login, password: 'wrong' });
   assert.equal(bad.status, 401);
+  const incorrect=await f.call('POST','/v1/auth/password',{oldPassword:'incorrect-password',password:'new-password-long-enough'},f.owner.token);
+  assert.equal(incorrect.status,403);assert.equal(incorrect.body.error,'current_password_incorrect');
+  assert.equal((await f.call('GET','/v1/auth/me',undefined,f.owner.token)).status,200);
   const changed = await f.call('POST', '/v1/auth/password', { oldPassword: 'correct-horse-battery', password: 'new-password-long-enough' }, f.owner.token);
   assert.equal(changed.status, 200);
   assert.equal((await f.call('GET', '/v1/auth/me', undefined, f.owner.token)).status, 401);

@@ -15,3 +15,13 @@ bool hasCompanyPermission(BuildContext context, String permission) =>
         ?.company
         ?.allows(permission) ??
     true;
+
+Iterable<Map<String, dynamic>> projectChoices(
+  List<Map<String, dynamic>> projects,
+  String? current,
+) sync* {
+  yield* projects;
+  if (current != null && !projects.any((p) => p['id'] == current)) {
+    yield {'id': current, 'name': 'Сохранённый проект'};
+  }
+}

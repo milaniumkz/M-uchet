@@ -149,13 +149,13 @@ export async function createApp(options = {}) {
   app.post('/v1/auth/password', { preHandler: auth, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async request => {
     const body = object(request.body);
     if (typeof body.oldPassword !== 'string' || body.oldPassword.length > 256 || typeof body.password !== 'string' || body.password.length < 12 || body.password.length > 256) fail(400, 'invalid_password');
-    const user = (await db.prepare('SELECT * FROM users WHERE id=?').get(request.user.id));
-    if (!await verifyPassword(body.oldPassword, user.password)) fail(401, 'invalid_credentials');
     const password = await hashPassword(body.password);
-    (await transaction(db, async () => {
-      (await db.prepare('UPDATE users SET password=? WHERE id=?').run(password, user.id));
-      (await db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id));
-    }));
+    await transaction(db, async () => {
+      const user=await db.prepare('SELECT * FROM users WHERE id=? FOR UPDATE').get(request.user.id);
+      if(!await verifyPassword(body.oldPassword,user.password))fail(403,'current_password_incorrect');
+      await db.prepare('UPDATE users SET password=? WHERE id=?').run(password,user.id);
+      await db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);
+    });
     return { ok: true, reauthenticationRequired: true };
   });
   app.get('/v1/companies', { preHandler: auth }, async request => (await db.prepare(`SELECT c.*,m.role,m.permissions FROM companies c

@@ -254,8 +254,10 @@
       "id": "D-30",
       "title": "Поможем разобраться",
       "platform": "desktop",
-      "status": "not_implemented",
-      "visual_parity_verified": false
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/help_workspace.dart",
+      "implemented_scope": "Поиск по инструкциям, пошаговые действия, переходы в доступные разделы, копирование сведений для владельца системы; внешний канал поддержки не подключён"
     },
     {
       "id": "M-01",
@@ -322,8 +324,10 @@
       "id": "M-08",
       "title": "Всё остальное рядом",
       "platform": "mobile",
-      "status": "not_implemented",
-      "visual_parity_verified": false
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/main_server.dart",
+      "implemented_scope": "Навигация по правам, справка и личная смена пароля; точная компоновка M-08 ещё не выполнена"
     }
   ]
 }

@@ -19,6 +19,8 @@ import 'workspace/access_workspace.dart';
 import 'workspace/company_access.dart';
 import 'workspace/money_transaction_dialog.dart';
 import 'workspace/cash_workspace.dart';
+import 'workspace/account_dialog.dart';
+import 'workspace/help_workspace.dart';
 import 'workspace/commercial_repository.dart' show moneyText;
 
 void main() => runApp(const AccountingWorkspace());
@@ -68,10 +70,12 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'periods': 'Закрытие месяца',
     'counterparties': 'Контрагенты',
     'catalog': 'Товары и услуги',
+    'help': 'Помощь и обучение',
   };
   bool can(String permission) => company?.allows(permission) ?? true;
   bool visible(String key) => switch (key) {
     'access' => company?.role == 'owner',
+    'help' => true,
     'projects' => can('projects.read') && can('reports.read'),
     'sales' || 'purchases' => can('documents.read'),
     'bank' => can('bank.read') && can('wallets.read'),
@@ -260,6 +264,29 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     projects = [];
     companies = [];
   });
+  Future<void> account() async {
+    final result = await showDialog<String>(
+      context: navigator.currentContext!,
+      barrierDismissible: false,
+      builder: (_) => AccountDialog(api: api),
+    );
+    if (result != null && mounted) {
+      api.clearSession();
+      navigator.currentState?.popUntil((route) => route.isFirst);
+      setState(() {
+        company = null;
+        companies = [];
+        report = null;
+        projects = [];
+        selected = null;
+        creatingCompany = false;
+        error = result == 'changed'
+            ? 'Пароль изменён. Войдите с новым паролем.'
+            : 'Проверьте вход с новым паролем. Если он не принят, используйте прежний.';
+      });
+    }
+  }
+
   Future<void> createProject() async {
     var name = '';
     final value = await showDialog<String>(
@@ -978,6 +1005,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                       'assets' => Icons.computer_outlined,
                       'employees' => Icons.badge_outlined,
                       'access' => Icons.admin_panel_settings_outlined,
+                      'help' => Icons.help_outline,
                       'journal' => Icons.menu_book_outlined,
                       'periods' => Icons.calendar_month_outlined,
                       'counterparties' => Icons.people_outline,
@@ -1007,6 +1035,11 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
           onPressed: busy || !can('organization.read') ? null : companySettings,
           icon: const Icon(Icons.business_outlined),
           label: const Text('Фирма'),
+        ),
+        TextButton.icon(
+          onPressed: busy ? null : account,
+          icon: const Icon(Icons.person_outline),
+          label: const Text('Мой аккаунт'),
         ),
         TextButton(onPressed: busy ? null : logout, child: const Text('Выйти')),
       ],
@@ -1147,6 +1180,11 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                                 : '${date(period!.start)} — ${date(period!.end)}',
                           ),
                         ),
+                      IconButton(
+                        tooltip: 'Мой аккаунт',
+                        onPressed: busy ? null : account,
+                        icon: const Icon(Icons.person_outline),
+                      ),
                       if (size.maxWidth < 1000)
                         IconButton(
                           tooltip: 'Фирма',
@@ -1162,7 +1200,14 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                 if (error != null)
                   Text(error!, style: const TextStyle(color: Colors.red)),
                 Expanded(
-                  child: ['sales', 'purchases'].contains(section)
+                  child: section == 'help'
+                      ? HelpWorkspace(
+                          api: api,
+                          companyName: company!.name,
+                          canOpen: visible,
+                          onOpen: (key) => setState(() => section = key),
+                        )
+                      : ['sales', 'purchases'].contains(section)
                       ? CommercialWorkspace(
                           key: ValueKey(
                             '${company!.id}:$selected:$section:$period',
@@ -1358,6 +1403,11 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           ),
                     icon: const Icon(Icons.receipt_long_outlined),
                     label: const Text('Операции'),
+                  ),
+                  IconButton(
+                    tooltip: 'Мой аккаунт',
+                    onPressed: busy ? null : account,
+                    icon: const Icon(Icons.person_outline),
                   ),
                   TextButton.icon(
                     onPressed: busy || !can('organization.read')

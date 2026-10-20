@@ -99,7 +99,14 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
       ),
     );
     if (result == true && mounted) {
-      try{await widget.onChanged();await load();}on BackendException catch(e){if(mounted){setState(()=>error=e.message);}}
+      try {
+        await widget.onChanged();
+        await load();
+      } on BackendException catch (e) {
+        if (mounted) {
+          setState(() => error = e.message);
+        }
+      }
     }
   }
 
@@ -121,20 +128,32 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
         runSpacing: 12,
         children: [
           FilledButton.icon(
-            onPressed: busy || !hasCompanyPermission(context,'inventory.receive') || products.isEmpty || warehouses.isEmpty
+            onPressed:
+                busy ||
+                    !hasCompanyPermission(context, 'inventory.receive') ||
+                    products.isEmpty ||
+                    warehouses.isEmpty
                 ? null
                 : () => action('receipt'),
             icon: const Icon(Icons.add),
             label: const Text('Поступление'),
           ),
           OutlinedButton(
-            onPressed: busy || !hasCompanyPermission(context,'inventory.move') || warehouses.length < 2 || products.isEmpty
+            onPressed:
+                busy ||
+                    !hasCompanyPermission(context, 'inventory.move') ||
+                    warehouses.length < 2 ||
+                    products.isEmpty
                 ? null
                 : () => action('transfer'),
             child: const Text('Перемещение'),
           ),
           OutlinedButton(
-            onPressed: busy || !hasCompanyPermission(context,'inventory.writeoff') || products.isEmpty || warehouses.isEmpty
+            onPressed:
+                busy ||
+                    !hasCompanyPermission(context, 'inventory.writeoff') ||
+                    products.isEmpty ||
+                    warehouses.isEmpty
                 ? null
                 : () => action('writeoff'),
             child: const Text('Списание'),
@@ -329,133 +348,139 @@ class _InventoryCommandDialogState extends State<InventoryCommandDialog> {
     onChanged: busy || pending != null ? null : change,
   );
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(switch (widget.type) {
-      'receipt' => 'Поступление товара',
-      'transfer' => 'Перемещение товара',
-      _ => 'Списание товара',
-    }),
-    content: SizedBox(
-      width: 600,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            select(
-              'Товар',
-              productId,
-              widget.products,
-              (v) => setState(() => productId = v),
-            ),
-            const SizedBox(height: 14),
-            select(
-              widget.type == 'transfer' ? 'Со склада' : 'Склад',
-              warehouseId,
-              widget.warehouses,
-              (v) => setState(() => warehouseId = v),
-            ),
-            const SizedBox(height: 14),
-            if (widget.type == 'transfer') ...[
+  Widget build(BuildContext context) => PopScope(
+    canPop: pending == null,
+    child: AlertDialog(
+      title: Text(switch (widget.type) {
+        'receipt' => 'Поступление товара',
+        'transfer' => 'Перемещение товара',
+        _ => 'Списание товара',
+      }),
+      content: SizedBox(
+        width: 600,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
               select(
-                'На склад',
-                targetId,
-                widget.warehouses,
-                (v) => setState(() => targetId = v),
+                'Товар',
+                productId,
+                widget.products,
+                (v) => setState(() => productId = v),
               ),
               const SizedBox(height: 14),
-            ],
-            TextField(
-              controller: quantity,
-              enabled: !busy && pending == null,
-              decoration: const InputDecoration(
-                labelText: 'Количество базовых единиц',
+              select(
+                widget.type == 'transfer' ? 'Со склада' : 'Склад',
+                warehouseId,
+                widget.warehouses,
+                (v) => setState(() => warehouseId = v),
               ),
-            ),
-            const SizedBox(height: 14),
-            if (widget.type == 'receipt')
-              TextField(
-                controller: cost,
-                enabled: !busy && pending == null,
-                decoration: const InputDecoration(
-                  labelText: 'Стоимость единицы, KZT',
+              const SizedBox(height: 14),
+              if (widget.type == 'transfer') ...[
+                select(
+                  'На склад',
+                  targetId,
+                  widget.warehouses,
+                  (v) => setState(() => targetId = v),
                 ),
-              ),
-            if (widget.type == 'writeoff')
-              TextField(
-                controller: reason,
-                enabled: !busy && pending == null,
-                decoration: const InputDecoration(
-                  labelText: 'Причина списания',
-                ),
-              ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: scope,
-              items: const [
-                DropdownMenuItem(
-                  value: 'ACCOUNTING',
-                  child: Text('Бухгалтерский учёт'),
-                ),
-                DropdownMenuItem(
-                  value: 'MANAGEMENT',
-                  child: Text('Управленческий учёт'),
-                ),
-                DropdownMenuItem(value: 'BOTH', child: Text('Оба контура')),
+                const SizedBox(height: 14),
               ],
-              onChanged: busy || pending != null
-                  ? null
-                  : (v) => setState(() => scope = v!),
-            ),
-            if (widget.type != 'transfer') ...[
+              TextField(
+                controller: quantity,
+                enabled: !busy && pending == null,
+                decoration: const InputDecoration(
+                  labelText: 'Количество базовых единиц',
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (widget.type == 'receipt')
+                TextField(
+                  controller: cost,
+                  enabled: !busy && pending == null,
+                  decoration: const InputDecoration(
+                    labelText: 'Стоимость единицы, KZT',
+                  ),
+                ),
+              if (widget.type == 'writeoff')
+                TextField(
+                  controller: reason,
+                  enabled: !busy && pending == null,
+                  decoration: const InputDecoration(
+                    labelText: 'Причина списания',
+                  ),
+                ),
               const SizedBox(height: 14),
               DropdownButtonFormField<String>(
                 isExpanded: true,
-                initialValue: projectId ?? 'unassigned',
-                decoration: const InputDecoration(labelText: 'Проект'),
-                items: [
-                  const DropdownMenuItem(
-                    value: 'unassigned',
-                    child: Text('Общие операции фирмы'),
+                initialValue: scope,
+                items: const [
+                  DropdownMenuItem(
+                    value: 'ACCOUNTING',
+                    child: Text('Бухгалтерский учёт'),
                   ),
-                  ...widget.projects.map(
-                    (p) => DropdownMenuItem(
-                      value: p['id'] as String,
-                      child: Text(p['name'] as String),
-                    ),
+                  DropdownMenuItem(
+                    value: 'MANAGEMENT',
+                    child: Text('Управленческий учёт'),
                   ),
+                  DropdownMenuItem(value: 'BOTH', child: Text('Оба контура')),
                 ],
                 onChanged: busy || pending != null
                     ? null
-                    : (v) => setState(
-                        () => projectId = v == 'unassigned' ? null : v,
+                    : (v) => setState(() => scope = v!),
+              ),
+              if (widget.type != 'transfer') ...[
+                const SizedBox(height: 14),
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: projectId ?? 'unassigned',
+                  decoration: const InputDecoration(labelText: 'Проект'),
+                  items: [
+                    const DropdownMenuItem(
+                      value: 'unassigned',
+                      child: Text('Общие операции фирмы'),
+                    ),
+                    ...projectChoices(widget.projects, projectId).map(
+                      (p) => DropdownMenuItem(
+                        value: p['id'] as String,
+                        child: Text(p['name'] as String),
                       ),
-              ),
+                    ),
+                  ],
+                  onChanged: busy || pending != null
+                      ? null
+                      : (v) => setState(
+                          () => projectId = v == 'unassigned' ? null : v,
+                        ),
+                ),
+              ],
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              if (pending != null)
+                const Text(
+                  'При неизвестном результате повторите запрос: повторного движения не будет.',
+                ),
             ],
-            if (error != null)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            if (pending != null)
-              const Text(
-                'При неизвестном результате повторите запрос: повторного движения не будет.',
-              ),
-          ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: busy || pending != null
+              ? null
+              : () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: busy ? null : save,
+          child: Text(pending == null ? 'Провести' : 'Повторить проведение'),
+        ),
+      ],
     ),
-    actions: [
-      TextButton(
-        onPressed: busy || pending != null
-            ? null
-            : () => Navigator.pop(context),
-        child: const Text('Отмена'),
-      ),
-      FilledButton(
-        onPressed: busy ? null : save,
-        child: Text(pending == null ? 'Провести' : 'Повторить проведение'),
-      ),
-    ],
   );
 }

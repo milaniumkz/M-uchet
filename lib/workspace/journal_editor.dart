@@ -64,7 +64,9 @@ class _JournalEditorState extends State<JournalEditor> {
   @override
   void initState() {
     super.initState();
-    projectId = widget.entry?['project_id'] as String? ?? widget.projectId;
+    projectId = widget.entry == null
+        ? widget.projectId
+        : widget.entry!['project_id'] as String?;
     scope = widget.entry?['scope'] as String? ?? 'ACCOUNTING';
     if (widget.entry == null) {
       addLine();
@@ -172,171 +174,179 @@ class _JournalEditorState extends State<JournalEditor> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      widget.entry == null
-          ? 'Новая бухгалтерская запись'
-          : 'Изменить бухгалтерскую запись',
-    ),
-    content: SizedBox(
-      width: 800,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: description,
-              enabled: !busy && pending == null && editable,
-              decoration: const InputDecoration(labelText: 'Описание'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: date,
-              enabled: !busy && pending == null && editable,
-              decoration: const InputDecoration(labelText: 'Дата YYYY-MM-DD'),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: scope,
-              items: const [
-                DropdownMenuItem(
-                  value: 'ACCOUNTING',
-                  child: Text('Бухгалтерский'),
-                ),
-                DropdownMenuItem(
-                  value: 'MANAGEMENT',
-                  child: Text('Управленческий'),
-                ),
-                DropdownMenuItem(value: 'BOTH', child: Text('Оба контура')),
-              ],
-              onChanged: busy || pending != null || !editable
-                  ? null
-                  : (v) => setState(() => scope = v!),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: projectId ?? 'unassigned',
-              items: [
-                const DropdownMenuItem(
-                  value: 'unassigned',
-                  child: Text('Общие операции фирмы'),
-                ),
-                ...widget.projects.map(
-                  (p) => DropdownMenuItem(
-                    value: p['id'] as String,
-                    child: Text(p['name'] as String),
-                  ),
-                ),
-              ],
-              onChanged: busy || pending != null || !editable
-                  ? null
-                  : (v) => setState(
-                      () => projectId = v == 'unassigned' ? null : v,
-                    ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Каждая строка содержит дебет или кредит. Итоги должны совпадать. Технический код счёта указывается явно; для кошелька — wallet:ID.',
-            ),
-            ...lines.indexed.map((item) {
-              final l = item.$2;
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: l.account,
-                        enabled: !busy && pending == null && editable,
-                        decoration: const InputDecoration(labelText: 'Счёт'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: l.debit,
-                        enabled: !busy && pending == null && editable,
-                        decoration: const InputDecoration(labelText: 'Дебет'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: l.credit,
-                        enabled: !busy && pending == null && editable,
-                        decoration: const InputDecoration(labelText: 'Кредит'),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed:
-                          busy ||
-                              pending != null ||
-                              !editable ||
-                              lines.length <= 2
-                          ? null
-                          : () {
-                              setState(() => lines.removeAt(item.$1));
-                              l.account.dispose();
-                              l.debit.dispose();
-                              l.credit.dispose();
-                            },
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                  ],
-                ),
-              );
-            }),
-            TextButton.icon(
-              onPressed:
-                  busy || pending != null || !editable || lines.length >= 100
-                  ? null
-                  : () => setState(() => addLine()),
-              icon: const Icon(Icons.add),
-              label: const Text('Добавить строку'),
-            ),
-            if (widget.entry != null) ...[
+  Widget build(BuildContext context) => PopScope(
+    canPop: pending == null,
+    child: AlertDialog(
+      title: Text(
+        widget.entry == null
+            ? 'Новая бухгалтерская запись'
+            : 'Изменить бухгалтерскую запись',
+      ),
+      content: SizedBox(
+        width: 800,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
               TextField(
-                controller: reason,
+                controller: description,
                 enabled: !busy && pending == null && editable,
-                decoration: const InputDecoration(
-                  labelText: 'Причина исправления',
-                ),
+                decoration: const InputDecoration(labelText: 'Описание'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: date,
+                enabled: !busy && pending == null && editable,
+                decoration: const InputDecoration(labelText: 'Дата YYYY-MM-DD'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: scope,
+                items: const [
+                  DropdownMenuItem(
+                    value: 'ACCOUNTING',
+                    child: Text('Бухгалтерский'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'MANAGEMENT',
+                    child: Text('Управленческий'),
+                  ),
+                  DropdownMenuItem(value: 'BOTH', child: Text('Оба контура')),
+                ],
+                onChanged: busy || pending != null || !editable
+                    ? null
+                    : (v) => setState(() => scope = v!),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: projectId ?? 'unassigned',
+                items: [
+                  const DropdownMenuItem(
+                    value: 'unassigned',
+                    child: Text('Общие операции фирмы'),
+                  ),
+                  ...projectChoices(widget.projects, projectId).map(
+                    (p) => DropdownMenuItem(
+                      value: p['id'] as String,
+                      child: Text(p['name'] as String),
+                    ),
+                  ),
+                ],
+                onChanged: busy || pending != null || !editable
+                    ? null
+                    : (v) => setState(
+                        () => projectId = v == 'unassigned' ? null : v,
+                      ),
               ),
               const SizedBox(height: 16),
-              Text('История изменений: ${history.length}'),
-              ...history.map(
-                (h) => Text('${h['changed_at']} · ${h['reason'] ?? ''}'),
-              ),
-            ],
-            if (error != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            if (pending != null)
               const Text(
-                'Повтор запроса использует исходные данные и ключ операции.',
+                'Каждая строка содержит дебет или кредит. Итоги должны совпадать. Технический код счёта указывается явно; для кошелька — wallet:ID.',
               ),
-          ],
+              ...lines.indexed.map((item) {
+                final l = item.$2;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: l.account,
+                          enabled: !busy && pending == null && editable,
+                          decoration: const InputDecoration(labelText: 'Счёт'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: l.debit,
+                          enabled: !busy && pending == null && editable,
+                          decoration: const InputDecoration(labelText: 'Дебет'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: l.credit,
+                          enabled: !busy && pending == null && editable,
+                          decoration: const InputDecoration(
+                            labelText: 'Кредит',
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed:
+                            busy ||
+                                pending != null ||
+                                !editable ||
+                                lines.length <= 2
+                            ? null
+                            : () {
+                                setState(() => lines.removeAt(item.$1));
+                                l.account.dispose();
+                                l.debit.dispose();
+                                l.credit.dispose();
+                              },
+                        icon: const Icon(Icons.delete_outline),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed:
+                    busy || pending != null || !editable || lines.length >= 100
+                    ? null
+                    : () => setState(() => addLine()),
+                icon: const Icon(Icons.add),
+                label: const Text('Добавить строку'),
+              ),
+              if (widget.entry != null) ...[
+                TextField(
+                  controller: reason,
+                  enabled: !busy && pending == null && editable,
+                  decoration: const InputDecoration(
+                    labelText: 'Причина исправления',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text('История изменений: ${history.length}'),
+                ...history.map(
+                  (h) => Text('${h['changed_at']} · ${h['reason'] ?? ''}'),
+                ),
+              ],
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+              if (pending != null)
+                const Text(
+                  'Повтор запроса использует исходные данные и ключ операции.',
+                ),
+            ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: busy || pending != null
+              ? null
+              : () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: busy || !editable ? null : save,
+          child: Text(
+            pending == null ? 'Сохранить запись' : 'Повторить сохранение',
+          ),
+        ),
+      ],
     ),
-    actions: [
-      TextButton(
-        onPressed: busy || pending != null
-            ? null
-            : () => Navigator.pop(context),
-        child: const Text('Отмена'),
-      ),
-      FilledButton(
-        onPressed: busy || !editable ? null : save,
-        child: Text(
-          pending == null ? 'Сохранить запись' : 'Повторить сохранение',
-        ),
-      ),
-    ],
   );
 }

@@ -134,7 +134,9 @@ class _AssetsWorkspaceState extends State<AssetsWorkspace> {
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
           ),
           FilledButton.icon(
-            onPressed: busy||!hasCompanyPermission(context,'assets.write') ? null : create,
+            onPressed: busy || !hasCompanyPermission(context, 'assets.write')
+                ? null
+                : create,
             icon: const Icon(Icons.add),
             label: const Text('Добавить актив'),
           ),
@@ -320,128 +322,156 @@ class _AssetDetailState extends State<AssetDetail> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(asset == null ? 'Основное средство' : asset!['name'] as String),
-    content: SizedBox(
-      width: 900,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (busy) const LinearProgressIndicator(),
-            if (error != null)
-              Text(error!, style: const TextStyle(color: Colors.red)),
-            if (asset != null) ...[
-              Text(
-                '${asset!['inventory_number']} · ${assetStatuses[asset!['status']]}',
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Первоначальная стоимость: ${moneyText(jsonObject(asset!['data'])['cost'] as num, widget.currency)}',
-              ),
-              Text(
-                'Амортизация: ${moneyText(asset!['depreciation'] as num, widget.currency)}',
-              ),
-              Text(
-                'Балансовая стоимость: ${moneyText(asset!['carryingAmount'] as num, widget.currency)}',
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 12,
-                runSpacing: 10,
-                children: [
-                  OutlinedButton(
-                    onPressed: busy || pending != null || !hasCompanyPermission(context,'assets.write') || (asset!['status']!='DRAFT'&&!hasCompanyPermission(context,'assets.post')) ? null : edit,
-                    child: const Text('Изменить актив'),
-                  ),
-                  if (asset!['status'] != 'ACTIVE')
-                    FilledButton(
-                      onPressed: busy || pending != null || !hasCompanyPermission(context,'assets.post')
-                          ? null
-                          : () => execute('activate', {}),
-                      child: Text(
-                        asset!['status'] == 'DRAFT'
-                            ? 'Ввести в эксплуатацию'
-                            : 'Восстановить актив',
-                      ),
-                    ),
-                  if (asset!['status'] == 'ACTIVE') ...[
-                    FilledButton(
-                      onPressed: busy || pending != null || !hasCompanyPermission(context,'assets.post') ? null : depreciate,
-                      child: const Text('Начислить амортизацию'),
-                    ),
+  Widget build(BuildContext context) => PopScope(
+    canPop: pending == null,
+    child: AlertDialog(
+      title: Text(
+        asset == null ? 'Основное средство' : asset!['name'] as String,
+      ),
+      content: SizedBox(
+        width: 900,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (busy) const LinearProgressIndicator(),
+              if (error != null)
+                Text(error!, style: const TextStyle(color: Colors.red)),
+              if (asset != null) ...[
+                Text(
+                  '${asset!['inventory_number']} · ${assetStatuses[asset!['status']]}',
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Первоначальная стоимость: ${moneyText(jsonObject(asset!['data'])['cost'] as num, widget.currency)}',
+                ),
+                Text(
+                  'Амортизация: ${moneyText(asset!['depreciation'] as num, widget.currency)}',
+                ),
+                Text(
+                  'Балансовая стоимость: ${moneyText(asset!['carryingAmount'] as num, widget.currency)}',
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  children: [
                     OutlinedButton(
-                      onPressed: busy || pending != null || !hasCompanyPermission(context,'assets.post') ? null : writeoff,
-                      child: const Text('Списать актив'),
+                      onPressed:
+                          busy ||
+                              pending != null ||
+                              !hasCompanyPermission(context, 'assets.write') ||
+                              (asset!['status'] != 'DRAFT' &&
+                                  !hasCompanyPermission(context, 'assets.post'))
+                          ? null
+                          : edit,
+                      child: const Text('Изменить актив'),
                     ),
-                  ],
-                ],
-              ),
-              if (pending != null)
-                TextButton(
-                  onPressed: busy ? null : () => execute('', {}),
-                  child: const Text('Повторить запрос'),
-                ),
-              const SizedBox(height: 24),
-              const Text(
-                'Амортизация по месяцам',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-              ),
-              ...((asset!['schedule'] as List)
-                  .map(jsonObject)
-                  .map(
-                    (m) => ListTile(
-                      dense: true,
-                      title: Text(m['month'] as String),
-                      trailing: Text(
-                        moneyText(m['amount'] as num, widget.currency),
+                    if (asset!['status'] != 'ACTIVE')
+                      FilledButton(
+                        onPressed:
+                            busy ||
+                                pending != null ||
+                                !hasCompanyPermission(context, 'assets.post')
+                            ? null
+                            : () => execute('activate', {}),
+                        child: Text(
+                          asset!['status'] == 'DRAFT'
+                              ? 'Ввести в эксплуатацию'
+                              : 'Восстановить актив',
+                        ),
                       ),
+                    if (asset!['status'] == 'ACTIVE') ...[
+                      FilledButton(
+                        onPressed:
+                            busy ||
+                                pending != null ||
+                                !hasCompanyPermission(context, 'assets.post')
+                            ? null
+                            : depreciate,
+                        child: const Text('Начислить амортизацию'),
+                      ),
+                      OutlinedButton(
+                        onPressed:
+                            busy ||
+                                pending != null ||
+                                !hasCompanyPermission(context, 'assets.post')
+                            ? null
+                            : writeoff,
+                        child: const Text('Списать актив'),
+                      ),
+                    ],
+                  ],
+                ),
+                if (pending != null)
+                  TextButton(
+                    onPressed: busy ? null : () => execute('', {}),
+                    child: const Text('Повторить запрос'),
+                  ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Амортизация по месяцам',
+                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+                ),
+                ...((asset!['schedule'] as List)
+                    .map(jsonObject)
+                    .map(
+                      (m) => ListTile(
+                        dense: true,
+                        title: Text(m['month'] as String),
+                        trailing: Text(
+                          moneyText(m['amount'] as num, widget.currency),
+                        ),
+                      ),
+                    )),
+                const SizedBox(height: 20),
+                Text(
+                  'История изменений: ${history.length}',
+                  style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                ...history.map(
+                  (h) => Text(
+                    '${h['changed_at']} · версия ${jsonObject(h['snapshot'])['version']}',
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Бухгалтерские движения',
+                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+                ),
+                ...movements.map(
+                  (m) => ListTile(
+                    dense: true,
+                    title: Text(m['kind'] as String),
+                    subtitle: Text(
+                      '${m['business_date']} · ${m['active'] == true ? 'Действующее' : 'История'}',
                     ),
-                  )),
-              const SizedBox(height: 20),
-              Text(
-                'История изменений: ${history.length}',
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              ...history.map(
-                (h) => Text(
-                  '${h['changed_at']} · версия ${jsonObject(h['snapshot'])['version']}',
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Бухгалтерские движения',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-              ),
-              ...movements.map(
-                (m) => ListTile(
-                  dense: true,
-                  title: Text(m['kind'] as String),
-                  subtitle: Text(
-                    '${m['business_date']} · ${m['active'] == true ? 'Действующее' : 'История'}',
-                  ),
-                  trailing: Text(
-                    '${(jsonDecodeLines(m['lines'])).length} строки',
+                    trailing: Text(
+                      '${(jsonDecodeLines(m['lines'])).length} строки',
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: busy ? null : load,
+          child: const Text('Обновить'),
+        ),
+        TextButton(
+          onPressed: busy || pending != null
+              ? null
+              : () => Navigator.pop(context),
+          child: const Text('Закрыть'),
+        ),
+      ],
     ),
-    actions: [
-      TextButton(onPressed: busy ? null : load, child: const Text('Обновить')),
-      TextButton(
-        onPressed: busy || pending != null
-            ? null
-            : () => Navigator.pop(context),
-        child: const Text('Закрыть'),
-      ),
-    ],
   );
   List<dynamic> jsonDecodeLines(Object? value) =>
       value is List ? value : jsonDecode(value as String) as List<dynamic>;
@@ -618,118 +648,124 @@ class _AssetEditorState extends State<AssetEditor> {
     ),
   );
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.asset == null ? 'Добавить актив' : 'Изменить актив'),
-    content: SizedBox(
-      width: 700,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            field(name, 'Название актива'),
-            field(number, 'Инвентарный номер'),
-            field(cost, 'Первоначальная стоимость, ${widget.currency}'),
-            field(residual, 'Остаточная стоимость, ${widget.currency}'),
-            field(life, 'Срок полезного использования, месяцев'),
-            field(date, 'Дата приобретения YYYY-MM-DD'),
-            field(start, 'Месяц начала амортизации YYYY-MM'),
-            field(location, 'Местонахождение'),
-            if (suppliers.isEmpty && !busy)
-              const Text('Добавьте поставщика в разделе «Контрагенты».'),
-            if (suppliers.isNotEmpty)
+  Widget build(BuildContext context) => PopScope(
+    canPop: pending == null,
+    child: AlertDialog(
+      title: Text(widget.asset == null ? 'Добавить актив' : 'Изменить актив'),
+      content: SizedBox(
+        width: 700,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              field(name, 'Название актива'),
+              field(number, 'Инвентарный номер'),
+              field(cost, 'Первоначальная стоимость, ${widget.currency}'),
+              field(residual, 'Остаточная стоимость, ${widget.currency}'),
+              field(life, 'Срок полезного использования, месяцев'),
+              field(date, 'Дата приобретения YYYY-MM-DD'),
+              field(start, 'Месяц начала амортизации YYYY-MM'),
+              field(location, 'Местонахождение'),
+              if (suppliers.isEmpty && !busy)
+                const Text('Добавьте поставщика в разделе «Контрагенты».'),
+              if (suppliers.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: supplierId,
+                  decoration: const InputDecoration(labelText: 'Поставщик'),
+                  items: suppliers
+                      .map(
+                        (s) => DropdownMenuItem(
+                          value: s.id,
+                          child: Text(s.data['name'] as String),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: busy || pending != null
+                      ? null
+                      : (v) => setState(() => supplierId = v),
+                ),
+              const SizedBox(height: 14),
               DropdownButtonFormField<String>(
                 isExpanded: true,
-                initialValue: supplierId,
-                decoration: const InputDecoration(labelText: 'Поставщик'),
-                items: suppliers
-                    .map(
-                      (s) => DropdownMenuItem(
-                        value: s.id,
-                        child: Text(s.data['name'] as String),
-                      ),
-                    )
-                    .toList(),
+                initialValue: projectId ?? 'unassigned',
+                decoration: const InputDecoration(labelText: 'Проект'),
+                items: [
+                  const DropdownMenuItem(
+                    value: 'unassigned',
+                    child: Text('Общие операции фирмы'),
+                  ),
+                  ...projectChoices(widget.projects, projectId).map(
+                    (p) => DropdownMenuItem(
+                      value: p['id'] as String,
+                      child: Text(p['name'] as String),
+                    ),
+                  ),
+                ],
                 onChanged: busy || pending != null
                     ? null
-                    : (v) => setState(() => supplierId = v),
+                    : (v) => setState(
+                        () => projectId = v == 'unassigned' ? null : v,
+                      ),
               ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: projectId ?? 'unassigned',
-              decoration: const InputDecoration(labelText: 'Проект'),
-              items: [
-                const DropdownMenuItem(
-                  value: 'unassigned',
-                  child: Text('Общие операции фирмы'),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: scope,
+                items: const [
+                  DropdownMenuItem(
+                    value: 'ACCOUNTING',
+                    child: Text('Бухгалтерский учёт'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'MANAGEMENT',
+                    child: Text('Управленческий учёт'),
+                  ),
+                  DropdownMenuItem(value: 'BOTH', child: Text('Оба контура')),
+                ],
+                onChanged: busy || pending != null
+                    ? null
+                    : (v) => setState(() => scope = v!),
+              ),
+              CheckboxListTile(
+                value: ack,
+                onChanged: busy || pending != null
+                    ? null
+                    : (v) => setState(() => ack = v!),
+                title: const Text(
+                  'Подтверждаю линейную амортизацию по полным месяцам и введённые параметры собственной учётной политики.',
                 ),
-                ...widget.projects.map(
-                  (p) => DropdownMenuItem(
-                    value: p['id'] as String,
-                    child: Text(p['name'] as String),
+              ),
+              const Text(
+                'Ввод в эксплуатацию создаёт актив и задолженность поставщику. Не учитывайте ту же покупку вторым документом расходов. Это бухгалтерский учёт; налоговые вычеты отдельно не определяются.',
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red),
                   ),
                 ),
-              ],
-              onChanged: busy || pending != null
-                  ? null
-                  : (v) => setState(
-                      () => projectId = v == 'unassigned' ? null : v,
-                    ),
-            ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: scope,
-              items: const [
-                DropdownMenuItem(
-                  value: 'ACCOUNTING',
-                  child: Text('Бухгалтерский учёт'),
-                ),
-                DropdownMenuItem(
-                  value: 'MANAGEMENT',
-                  child: Text('Управленческий учёт'),
-                ),
-                DropdownMenuItem(value: 'BOTH', child: Text('Оба контура')),
-              ],
-              onChanged: busy || pending != null
-                  ? null
-                  : (v) => setState(() => scope = v!),
-            ),
-            CheckboxListTile(
-              value: ack,
-              onChanged: busy || pending != null
-                  ? null
-                  : (v) => setState(() => ack = v!),
-              title: const Text(
-                'Подтверждаю линейную амортизацию по полным месяцам и введённые параметры собственной учётной политики.',
-              ),
-            ),
-            const Text(
-              'Ввод в эксплуатацию создаёт актив и задолженность поставщику. Не учитывайте ту же покупку вторым документом расходов. Это бухгалтерский учёт; налоговые вычеты отдельно не определяются.',
-            ),
-            if (error != null)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: busy || pending != null
+              ? null
+              : () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: busy || suppliers.isEmpty ? null : save,
+          child: Text(
+            pending == null ? 'Сохранить актив' : 'Повторить сохранение',
+          ),
+        ),
+      ],
     ),
-    actions: [
-      TextButton(
-        onPressed: busy || pending != null
-            ? null
-            : () => Navigator.pop(context),
-        child: const Text('Отмена'),
-      ),
-      FilledButton(
-        onPressed: busy || suppliers.isEmpty ? null : save,
-        child: Text(
-          pending == null ? 'Сохранить актив' : 'Повторить сохранение',
-        ),
-      ),
-    ],
   );
 }
 
