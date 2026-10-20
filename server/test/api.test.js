@@ -218,7 +218,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 8);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 10);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -454,4 +454,187 @@ test('manual journal permissions cannot bypass wallet transaction permissions',a
  assert.equal((await f.api('PUT',`/members/${member.id}`,{permissions:['accounting.post']})).status,200);
  const posted=await f.call('POST',f.prefix+'/accounting/journal',{description:'No wallet permission',lines:[{account:`wallet:${wallet.id}`,debit:1},{account:'capital',credit:1}]},member.token,randomUUID());
  assert.equal(posted.status,403);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,0);
+});
+
+
+async function commercialFixture(t,{vat=false}={}){
+ const f=await fixture(t);
+ await f.api('PUT','/settings',{version:0,legalName:'SYNTHETIC FIRM',identifier:'000000000000',legalForm:'TOO',taxRegime:'GENERAL',vatRegistered:vat});
+ const client=(await f.api('POST','/resources/clients',{data:{name:'SYNTHETIC CLIENT',identifier:'000000000001'}})).body;
+ const supplier=(await f.api('POST','/resources/suppliers',{data:{name:'SYNTHETIC SUPPLIER',identifier:'000000000002'}})).body;
+ const wallet=(await f.api('POST','/wallets',{name:'BANK'})).body;
+ const project=(await f.api('POST','/projects',{name:'Услуги IT'})).body;
+ const body={kind:'SALE_ACT',counterpartyId:client.id,projectId:project.id,items:[{description:'Разработка',quantity:'1.000',unitPrice:10000}],businessDate:'2026-10-20'};
+ return {...f,client,supplier,wallet,project,body};
+}
+test('service invoice advance converts to act without recognizing revenue twice',async t=>{
+ const f=await commercialFixture(t);
+ const invoice=await f.api('POST','/commercial-documents',{...f.body,kind:'SALE_INVOICE'});assert.equal(invoice.status,200);
+ const id=invoice.body.id;
+ assert.equal((await f.api('POST',`/commercial-documents/${id}/post`,{})).body.status,'ISSUED');
+ const paid=await f.api('POST',`/commercial-documents/${id}/payments`,{walletId:f.wallet.id,amount:4000,businessDate:'2026-10-20'});assert.equal(paid.status,200);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.revenue,0);
+ const act=(await f.api('POST',`/commercial-documents/${id}/act`,{})).body;
+ assert.equal((await f.api('POST',`/commercial-documents/${id}/act`,{})).body.id,act.id);
+ const posted=await f.api('POST',`/commercial-documents/${act.id}/post`,{});assert.equal(posted.status,200);assert.equal(posted.body.outstanding,6000);
+ const list=(await f.api('GET','/commercial-documents?limit=1')).body;
+ assert.equal(list.items.length,1);assert.equal(list.summary.count,2);assert.equal(list.summary.drafts,0);assert.equal(list.summary.outstanding,6000);
+ assert.equal((await f.api('GET','/commercial-documents?direction=purchases')).body.summary.count,0);
+ assert.equal((await f.api('GET','/commercial-documents?projectId=unassigned')).body.summary.count,0);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.revenue,10000);
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/payments`,{walletId:f.wallet.id,amount:6000,businessDate:'2026-10-21'})).status,200);
+ assert.equal((await f.api('GET',`/commercial-documents/${act.id}`)).body.outstanding,0);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,10000);
+ assert.equal((await f.api('GET','/inventory')).body.items.length,0);
+ const trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;
+ assert.equal(trial.find(a=>a.account==='receivables').balance,0);
+ assert.equal((trial.find(a=>a.account==='customer_advances')?.balance??0),0);
+});
+test('posted paid act can change project and amount, cancel and restore with exact balances',async t=>{
+ const f=await commercialFixture(t),other=(await f.api('POST','/projects',{name:'Другой проект'})).body;
+ let act=(await f.api('POST','/commercial-documents',f.body)).body;
+ act=(await f.api('POST',`/commercial-documents/${act.id}/post`,{})).body;
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/payments`,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'})).status,200);
+ let edit=await f.api('PUT',`/commercial-documents/${act.id}`,{version:act.version,projectId:other.id,items:[{description:'Исправленный объём',quantity:'0.500',unitPrice:10000}]});
+ assert.equal(edit.status,200);assert.equal(edit.body.customerCredit,5000);
+ let report=(await f.api('GET','/reports/projects')).body;
+ assert.equal(report.items.find(p=>p.projectId===f.project.id).netProfit,0);assert.equal(report.items.find(p=>p.projectId===other.id).netProfit,5000);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,10000);
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/cancel`,{})).status,200);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.revenue,0);
+ let trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;
+ assert.equal(trial.find(a=>a.account==='customer_advances').balance,-10000);assert.equal(trial.find(a=>a.account==='receivables').balance,0);
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/post`,{})).status,200);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.revenue,5000);
+ assert.ok((await f.api('GET',`/commercial-documents/${act.id}/history`)).body.items.length>=4);
+});
+test('service VAT calculations are exact and pending input VAT is not a claimed deduction',async t=>{
+ const f=await commercialFixture(t,{vat:true});
+ let sale=await f.api('POST','/commercial-documents',{...f.body,vatBasisPoints:1600,items:[{description:'Часть услуги',quantity:'0.125',unitPrice:123}]});
+ assert.equal(sale.status,200);assert.equal(sale.body.data.net,15);assert.equal(sale.body.data.vat,2);assert.equal(sale.body.data.total,17);
+ assert.equal((await f.api('POST',`/commercial-documents/${sale.body.id}/post`,{})).status,200);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.revenue,15);
+ let purchase=await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_ACT',counterpartyId:f.supplier.id,vatBasisPoints:1600,vatTreatment:'PENDING'});
+ assert.equal(purchase.status,200);assert.equal((await f.api('POST',`/commercial-documents/${purchase.body.id}/post`,{})).status,200);
+ const trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;
+ assert.equal(trial.find(a=>a.account==='vat_payable').balance,-2);assert.equal(trial.find(a=>a.account==='pending_input_vat').balance,1600);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.expenses,10000);
+ assert.equal((await f.api('POST','/commercial-documents',{...f.body,vatBasisPoints:1600,businessDate:'2027-01-01'})).status,422);
+});
+test('document numbers withstand concurrent creation; cross-company references and stale edits fail',async t=>{
+ const f=await commercialFixture(t);
+ const docs=await Promise.all(Array.from({length:8},()=>f.api('POST','/commercial-documents',f.body)));
+ assert.ok(docs.every(d=>d.status===200));assert.equal(new Set(docs.map(d=>d.body.number)).size,8);
+ const doc=docs[0].body;
+ assert.equal((await f.api('PUT',`/commercial-documents/${doc.id}`,{version:99,note:'Stale'})).status,409);
+ const outsider=await f.user('document-outsider@example.test');
+ assert.equal((await f.call('GET',f.prefix+`/commercial-documents/${doc.id}`,undefined,outsider.token)).status,404);
+ assert.equal((await f.api('POST','/commercial-documents',{...f.body,counterpartyId:'foreign'})).status,404);
+});
+
+test('purchase service payment can be edited, voided and restored without stock or duplicate expenses',async t=>{
+ const f=await commercialFixture(t);
+ await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:30000,description:'Funding'});
+ let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_ACT',counterpartyId:f.supplier.id,vatBasisPoints:1600})).body;
+ doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ const paid=await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:4600,businessDate:'2026-10-21'});assert.equal(paid.status,200);
+ const path=`/commercial-documents/${doc.id}/payments/${paid.body.id}`;
+ assert.equal((await f.api('PUT',path,{amount:6000})).status,200);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,24000);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.expenses,11600);
+ assert.equal((await f.api('POST',path+'/void',{})).status,200);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,30000);
+ assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.outstanding,11600);
+ assert.equal((await f.api('POST',path+'/restore',{})).status,200);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,24000);
+ assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.outstanding,5600);
+ assert.equal((await f.api('GET','/inventory')).body.items.length,0);
+});
+test('moving act after its payment date reclassifies payment as an advance until recognition',async t=>{
+ const f=await commercialFixture(t);
+ let doc=(await f.api('POST','/commercial-documents',f.body)).body;
+ doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'});
+ assert.equal((await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,businessDate:'2026-10-25'})).status,200);
+ assert.equal((await f.api('GET','/reports/projects?to=2026-10-21')).body.total.revenue,0);
+ assert.equal((await f.api('GET','/reports/projects?to=2026-10-25')).body.total.revenue,10000);
+ const row=await f.app.db.prepare("SELECT SUM(l.debit-l.credit) AS balance FROM journal_lines l JOIN journal j ON j.id=l.entry_id WHERE j.company_id=? AND j.business_date<=? AND l.account='customer_advances'").get(f.company.id,'2026-10-21');
+ assert.equal(row.balance,-10000);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,10000);
+});
+test('print export is authorized, escapes client text and metadata mutations replay safely',async t=>{
+ const f=await commercialFixture(t);
+ const key=randomUUID(),body={data:{name:'<script>BAD</script>'}};
+ const a=await f.api('POST','/resources/clients',body,key),b=await f.api('POST','/resources/clients',body,key);assert.equal(a.body.id,b.body.id);
+ const doc=(await f.api('POST','/commercial-documents',{...f.body,counterpartyId:a.body.id})).body;
+ const printed=await f.app.inject({url:f.prefix+`/commercial-documents/${doc.id}/print`,headers:{authorization:`Bearer ${f.owner.token}`}});
+ assert.equal(printed.statusCode,200);assert.ok(printed.body.includes('&lt;script&gt;BAD&lt;/script&gt;'));assert.ok(!printed.body.includes('<script>BAD'));
+ assert.match(printed.headers['content-security-policy'],/default-src 'none'/);
+ const member=await f.user('reader-no-export@example.test');await f.api('PUT',`/members/${member.id}`,{permissions:['documents.read']});
+ assert.equal((await f.call('GET',f.prefix+`/commercial-documents/${doc.id}/export-data`,undefined,member.token)).status,403);
+});
+
+test('commercial source edits preserve document/ledger links and attachments stay company-private',async t=>{
+ const f=await commercialFixture(t);
+ let doc=(await f.api('POST','/commercial-documents',f.body)).body;doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ const movement=(await f.api('GET',`/commercial-documents/${doc.id}/movements`)).body.items.find(m=>m.active);
+ assert.equal((await f.api('PUT',`/accounting/journal/${movement.id}`,{lines:[{account:'receivables',debit:1},{account:'revenue',credit:1}]})).body.error,'source_document_edit_required');
+ assert.equal((await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,items:[{description:'Изменено',quantity:'1',unitPrice:1}]})).status,200);
+ const upload=await f.app.inject({method:'POST',url:f.prefix+'/files',payload:Buffer.from('--b\r\nContent-Disposition: form-data; name="file"; filename="contract.txt"\r\nContent-Type: text/plain\r\n\r\nSYNTHETIC\r\n--b--\r\n'),headers:{authorization:`Bearer ${f.owner.token}`,'content-type':'multipart/form-data; boundary=b'}});
+ assert.equal(upload.statusCode,200);
+ const attached=await f.api('POST',`/commercial-documents/${doc.id}/files`,{fileId:upload.json().id});assert.equal(attached.status,200);
+ assert.equal((await f.api('GET',`/commercial-documents/${doc.id}/files`)).body.items[0].id,upload.json().id);
+ assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/files`,{fileId:'foreign-file-id'})).status,404);
+});
+
+test('bank requisites validate checksum and document snapshots change only on explicit refresh',async t=>{
+ const f=await commercialFixture(t);
+ const bban='0000000000000000',checksum=String(98n-BigInt(bban+'203500')%97n).padStart(2,'0'),iban='KZ'+checksum+bban;
+ let settings=(await f.api('GET','/settings')).body;
+ const payload={version:settings.version,legalName:settings.legal_name,identifier:settings.identifier,legalForm:settings.legal_form,taxRegime:settings.tax_regime,vatRegistered:settings.vat_registered,bankIban:iban,bankBic:'TESTKZKX',legalAddress:'SYNTHETIC ADDRESS'};
+ assert.equal((await f.api('PUT','/settings',{...payload,bankIban:iban.slice(0,-1)+'1'})).status,400);
+ assert.equal((await f.api('PUT','/settings',payload)).status,200);
+ let doc=(await f.api('POST','/commercial-documents',f.body)).body;
+ assert.equal(doc.data.issuer.bank_iban,iban);
+ settings=(await f.api('GET','/settings')).body;
+ assert.equal((await f.api('PUT','/settings',{...payload,version:settings.version,legalName:'CHANGED SYNTHETIC NAME'})).status,200);
+ doc=(await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,note:'Edit note'})).body;
+ assert.equal(doc.data.issuer.legal_name,payload.legalName);
+ doc=(await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,refreshIssuer:true})).body;
+ assert.equal(doc.data.issuer.legal_name,'CHANGED SYNTHETIC NAME');
+});
+
+
+test('offline first owner provisioning is atomic, stores only hashes and keeps HTTP registration closed', async t => {
+ const {createInitialOwner}=await import('../src/initial-owner.js');
+ const {verifyPassword}=await import('../src/security.js');
+ const dataDir=await mkdtemp(join(tmpdir(),'muchet-owner-'));
+ const app=await createApp({dataDir,schema:testSchema(),allowRegistration:false});
+ t.after(async()=>{await app.db.exec(`DROP SCHEMA "${app.db.schema}" CASCADE`);await app.close();await rm(dataDir,{recursive:true,force:true});});
+ const call=async(method,url,payload,token)=>{const r=await app.inject({method,url,payload,headers:token?{authorization:'Bearer '+token}:{}});return {status:r.statusCode,body:r.json()};};
+ const input={login:'OWNER@example.test',name:'SYNTHETIC INITIAL OWNER',password:randomUUID()};
+ await assert.rejects(createInitialOwner(app.db,{...input,password:'short'}),e=>e.statusCode===400);
+ const results=await Promise.allSettled([createInitialOwner(app.db,input),createInitialOwner(app.db,input)]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ assert.equal(results.find(r=>r.status==='rejected').reason.code,'initial_owner_already_exists');
+ const stored=await app.db.prepare('SELECT * FROM users').all();assert.equal(stored.length,1);
+ assert.equal(stored[0].login,'owner@example.test');assert.notEqual(stored[0].password,input.password);
+ assert.equal(await verifyPassword(input.password,stored[0].password),true);
+ assert.equal((await call('POST','/v1/auth/register',input)).status,403);
+ const session=await call('POST','/v1/auth/login',{login:input.login,password:input.password});assert.equal(session.status,200);
+ assert.equal((await call('GET','/v1/companies',undefined,session.body.token)).body.length,0);
+});
+
+
+test('company creation retries create one firm and never replay another owner response', async t=>{
+ const {app,call,user}=await fixture(t);
+ const a=await user('company-owner-a@example.test'),b=await user('company-owner-b@example.test');
+ const token=a.token??a; const other=b.token??b;
+ const key=randomUUID(),payload={name:'SYNTHETIC RETRY FIRM',currency:'KZT'};
+ const results=await Promise.all([call('POST','/v1/companies',payload,token,key),call('POST','/v1/companies',payload,token,key)]);
+ assert.equal(results[0].status,201);assert.equal(results[1].status,201);assert.equal(results[0].body.id,results[1].body.id);
+ assert.equal((await call('POST','/v1/companies',{...payload,name:'changed'},token,key)).status,409);
+ const second=await call('POST','/v1/companies',payload,other,key);assert.equal(second.status,201);assert.notEqual(second.body.id,results[0].body.id);
+ assert.equal((await call('GET','/v1/companies',undefined,token)).body.length,1);
+ assert.equal((await app.db.prepare("SELECT count(*) AS n FROM audit WHERE action='company.create' AND actor_id<> (SELECT id FROM users WHERE login='owner@example.test')").get()).n,2);
 });

@@ -21,8 +21,34 @@ class BackendException implements Exception {
       'project_not_found': 'Проект не найден или недоступен.',
       'invalid_identifier': 'БИН / ИИН должен содержать 12 цифр.',
       'no_company': 'У аккаунта пока нет доступной фирмы.',
+      'company_settings_required': 'Сначала заполните параметры фирмы.',
+      'issuer_identifier_required':
+          'Заполните БИН / ИИН фирмы в параметрах и обновите реквизиты документа.',
+      'vat_registration_required':
+          'Для начисления НДС нужна указанная регистрация фирмы по НДС.',
+      'vat_reason_required':
+          'Укажите основание документа без НДС или выберите ставку.',
+      'vat_rule_version_unavailable':
+          'Для выбранной даты ставка ещё не настроена.',
+      'unsupported_vat_rate': 'Выберите поддерживаемую ставку НДС.',
+      'invalid_pending_input_vat':
+          'Проверьте регистрацию по НДС и сумму входящего НДС.',
+      'counterparty_not_found': 'Контрагент не найден или недоступен.',
+      'overpayment': 'Сумма превышает остаток к оплате.',
+      'document_not_posted': 'Сначала выставьте счёт или проведите акт.',
+      'invalid_service_quantity':
+          'Укажите положительное количество, до трёх знаков после запятой.',
+      'invalid_total': 'Укажите стоимость услуг: итог должен быть больше нуля.',
+      'invalid_bank_iban':
+          'Проверьте IBAN: нужен казахстанский счёт с корректной контрольной суммой.',
+      'invalid_bank_bic': 'Проверьте БИК банка.',
+      'file_too_large': 'Размер файла не должен превышать 10 МБ.',
+      'source_document_edit_required':
+          'Откройте документ-основание: его изменение пересчитает все связанные движения.',
     };
-    if (messages.containsKey(code)) return messages[code]!;
+    if (messages.containsKey(code)) {
+      return messages[code]!;
+    }
     return switch (status) {
       401 => 'Сессия завершена. Войдите снова.',
       403 => 'Недостаточно прав для этого действия.',
@@ -91,6 +117,68 @@ class BackendClient {
     _transport.close();
   }
 
+  Future<Map<String, dynamic>> uploadFile(
+      String companyId, List<int> bytes, String filename) async {
+    if (_token == null) {
+      throw const BackendException('authentication_required', status: 401);
+    }
+    if (bytes.length > 10 * 1024 * 1024) {
+      throw const BackendException('file_too_large', status: 413);
+    }
+    final request = http.MultipartRequest('POST',
+        origin.replace(pathSegments: ['v1', 'companies', companyId, 'files']))
+      ..headers['Authorization'] = 'Bearer $_token'
+      ..files
+          .add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    try {
+      final response = await http.Response.fromStream(
+              await _transport.send(request).timeout(timeout))
+          .timeout(timeout);
+      final result = jsonDecode(response.body);
+      if (response.statusCode == 401) {
+        clearSession();
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw BackendException(
+            result is Map<String, dynamic>
+                ? result['error'] as String? ?? 'request_failed'
+                : 'request_failed',
+            status: response.statusCode);
+      }
+      return jsonObject(result);
+    } on TimeoutException {
+      throw const BackendException('network_error');
+    } on http.ClientException {
+      throw const BackendException('network_error');
+    } on FormatException {
+      throw const BackendException('invalid_server_response');
+    }
+  }
+
+  Future<List<int>> downloadFile(String companyId, String id) async {
+    if (_token == null) {
+      throw const BackendException('authentication_required', status: 401);
+    }
+    try {
+      final response = await _transport.get(
+          origin.replace(
+              pathSegments: ['v1', 'companies', companyId, 'files', id]),
+          headers: {'Authorization': 'Bearer $_token'}).timeout(timeout);
+      if (response.statusCode == 401) {
+        clearSession();
+      }
+      if (response.statusCode != 200) {
+        throw BackendException('file_download_failed',
+            status: response.statusCode);
+      }
+      return response.bodyBytes;
+    } on TimeoutException {
+      throw const BackendException('network_error');
+    } on http.ClientException {
+      throw const BackendException('network_error');
+    }
+  }
+
   Future<Object?> request(
     String method,
     List<String> path, {
@@ -105,8 +193,12 @@ class BackendClient {
     final uri = origin.replace(pathSegments: path, queryParameters: query);
     final request = http.Request(method, uri)
       ..headers['Accept'] = 'application/json';
-    if (authenticated) request.headers['Authorization'] = 'Bearer $_token';
-    if (operation != null) request.headers['Idempotency-Key'] = operation.value;
+    if (authenticated) {
+      request.headers['Authorization'] = 'Bearer $_token';
+    }
+    if (operation != null) {
+      request.headers['Idempotency-Key'] = operation.value;
+    }
     if (body != null) {
       request.headers['Content-Type'] = 'application/json';
       request.body = jsonEncode(body);
@@ -119,12 +211,16 @@ class BackendClient {
       try {
         result = jsonDecode(response.body);
       } on FormatException {
-        if (response.statusCode == 401) clearSession();
+        if (response.statusCode == 401) {
+          clearSession();
+        }
         throw BackendException('invalid_server_response',
             status: response.statusCode);
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        if (response.statusCode == 401 && authenticated) clearSession();
+        if (response.statusCode == 401 && authenticated) {
+          clearSession();
+        }
         final error =
             result is Map<String, dynamic> ? result : const <String, dynamic>{};
         throw BackendException(

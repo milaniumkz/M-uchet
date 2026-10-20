@@ -23,9 +23,10 @@
       "summary": "Основная ставка 16%; не универсальна для всех операций. Для специальных категорий указаны другие ставки/освобождения; условия требуют отдельной проверки.",
       "checked_at": "2026-10-20",
       "status": "selected_text_researched",
-      "calculation_implemented": false,
+      "calculation_implemented": true,
       "official_schema_verified": false,
-      "accountant_accepted": false
+      "accountant_accepted": false,
+      "calculation_scope": "Только явно выбранная основная ставка16% на строках документов услуг за2026; не подтверждает применимость к конкретной операции, вычет входящего НДС или готовность декларации."
     },
     {
       "id": "KZ-SNR-723-2026",
@@ -112,6 +113,45 @@
       "effective_from": "2026-01-01",
       "effective_to": "2026-12-31",
       "summary": "МЗП85000 тенге, МРП4325 тенге только для2026; не являются полной формулой любого платежа.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-SNR-ACCRUAL-724-2026",
+      "article": "724(1),(4),(7),(8)",
+      "summary": "Объект СНР — доход по методу начисления, не прибыль после всех расходов. Уменьшение на доходы работников имеет условие превышения24000МРП и отдельный порядок. Корректировки имеют собственный налоговый период; один доход не учитывается дважды.",
+      "source_id": "K2500000214",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-IP-SERVICE-RECOGNITION-725-2026",
+      "article": "725(4)",
+      "summary": "Для ИП без бухгалтерского учёта доход услуг по акту/иному подтверждающему документу признаётся в периоде его подписания; поступление аванса само по себе не заменяет это основание.",
+      "source_id": "K2500000214",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-SNR-DUE-727-2026",
+      "article": "727(1)-(2)",
+      "summary": "Представление упрощённой декларации — до15числа второго месяца после отчётного периода; уплата — до25. Переносы/календарь и период необходимо проверять отдельно.",
+      "source_id": "K2500000214",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
       "checked_at": "2026-10-20",
       "status": "selected_text_researched",
       "calculation_implemented": false,

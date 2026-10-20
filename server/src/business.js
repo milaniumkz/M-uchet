@@ -1,7 +1,7 @@
 import { registerProjectRoutes } from './projects.js';
 import { randomUUID } from 'node:crypto';
-import { fail, integer, scope, text, businessDate } from './security.js';
-import { allocate, postJournal, orderInput, normalizeLines, projectReference, syncWalletBalances } from './accounting.js';
+import { fail, integer, scope, text, businessDate, bankIban } from './security.js';
+import { allocate, postJournal, orderInput, normalizeLines, projectReference, syncWalletBalances, registerManualWalletEntries } from './accounting.js';
 import { accountReference } from './legal.js';
 
 const now = () => new Date().toISOString();
@@ -44,7 +44,10 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if(identifier!==null&&!/^[0-9]{12}$/.test(identifier))fail(400,'invalid_identifier');
     const name=text(body.legalName,'legalName',250),version=(old?.version??0)+1;
     if(old)await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'company_settings',company.id,JSON.stringify(old),request.user.id);
-    await db.prepare(`INSERT INTO company_settings VALUES(?,?,?,?,?,?,?) ON CONFLICT(company_id) DO UPDATE SET legal_name=excluded.legal_name,identifier=excluded.identifier,legal_form=excluded.legal_form,tax_regime=excluded.tax_regime,vat_registered=excluded.vat_registered,version=excluded.version`).run(company.id,name,identifier,body.legalForm,body.taxRegime,body.vatRegistered,version);
+    const optional=(key,column,max=250)=>{const value=body[key]??old?.[column]??'';if(typeof value!=='string'||value.length>max)fail(400,`invalid_${key}`);return value.trim();};
+    const address=optional('legalAddress','legal_address',500),iban=bankIban(optional('bankIban','bank_iban',40)),bic=optional('bankBic','bank_bic',11).toUpperCase(),director=optional('directorName','director_name'),accountant=optional('accountantName','accountant_name');
+    if(bic&&!/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(bic))fail(400,'invalid_bank_bic');
+    await db.prepare(`INSERT INTO company_settings(company_id,legal_name,identifier,legal_form,tax_regime,vat_registered,version,legal_address,bank_iban,bank_bic,director_name,accountant_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(company_id) DO UPDATE SET legal_name=excluded.legal_name,identifier=excluded.identifier,legal_form=excluded.legal_form,tax_regime=excluded.tax_regime,vat_registered=excluded.vat_registered,version=excluded.version,legal_address=excluded.legal_address,bank_iban=excluded.bank_iban,bank_bic=excluded.bank_bic,director_name=excluded.director_name,accountant_name=excluded.accountant_name`).run(company.id,name,identifier,body.legalForm,body.taxRegime,body.vatRegistered,version,address,iban,bic,director,accountant);
     return await db.prepare('SELECT * FROM company_settings WHERE company_id=?').get(company.id);
   }));
   route('GET','/accounting/chart',async request=>{
@@ -52,6 +55,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     return accountReference(request.query.asOf??businessDate(undefined,company.timezone));
   });
 
+  const commercialSource=async(companyId,id)=>db.prepare(`SELECT document_id FROM commercial_postings WHERE company_id=? AND journal_id=? UNION SELECT document_id FROM commercial_payments WHERE company_id=? AND journal_id=? UNION SELECT p.document_id FROM commercial_payments p JOIN wallet_entries e ON e.reference_id=p.id WHERE p.company_id=? AND e.journal_id=? LIMIT 1`).get(companyId,id,companyId,id,companyId,id);
   route('GET', '/wallets', async request => {
     (await access(request, 'wallets.read'));
     return { items: (await db.prepare('SELECT * FROM wallets WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId, request.query.after ?? '', pageLimit(request.query))) };
@@ -246,8 +250,10 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if ((await db.prepare('SELECT 1 FROM journal_reversals WHERE original_id=? OR reversal_id=?').get(row.id, row.id))) fail(409, 'journal_already_reversed');
     // Reversing generated journal entries independently would desynchronize stock/wallets/orders.
     if (!row.description.startsWith('Manual: ')) fail(409, 'business_command_reversal_required');
+    if(await commercialSource(company.id,row.id))fail(409,'source_document_edit_required');
     const reason = text(object(request.body).reason, 'reason', 400);
     const result = (await postJournal(db, company, { scope: row.scope, projectId: row.project_id, description: `Reversal: ${reason}`, lines: JSON.parse(row.lines).map(line => ({ account: line.account, debit: line.credit, credit: line.debit })) }));
+    await registerManualWalletEntries(db,company.id,result.id,result.lines,'JOURNAL_REVERSAL');
     (await db.prepare('INSERT INTO journal_reversals VALUES(?,?)').run(row.id, result.id));
     return { ...result, originalId: row.id };
   })));
@@ -302,6 +308,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const body=object(request.body),reason=body.reason===undefined?'Owner requested edit':text(body.reason,'reason',500);
     await db.prepare("SELECT set_config('app.edit_reason',?,true)").get(reason);
     const replacement={id:old.id,projectId:await projectReference(db,company.id,Object.hasOwn(body,'projectId')?body.projectId:old.project_id),scope:scope(body.scope??old.scope),description:text(body.description??old.description,'description',500),businessDate:businessDate(body.businessDate??old.business_date,company.timezone),lines:normalizeLines({lines:body.lines??JSON.parse(old.lines)})};
+    if(await commercialSource(company.id,old.id)&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
     if([...JSON.parse(old.lines),...replacement.lines].some(line=>line.account.startsWith('wallet:')))await access(request,'wallets.transact');
     await db.prepare('UPDATE journal SET scope=?,description=?,lines=?,business_date=?,project_id=? WHERE id=?').run(replacement.scope,replacement.description,JSON.stringify(replacement.lines),replacement.businessDate,replacement.projectId,old.id);
     await db.prepare('DELETE FROM journal_lines WHERE entry_id=?').run(old.id);
@@ -310,9 +317,10 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     for(const entry of linked){
       const amount=replacement.lines.filter(line=>line.account===`wallet:${entry.wallet_id}`).reduce((sum,line)=>sum+line.debit-line.credit,0);
       await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'wallet_entry',entry.id,JSON.stringify(entry),request.user.id);
-      await db.prepare('UPDATE wallet_entries SET amount=?,kind=? WHERE id=?').run(amount,amount<0?'EXPENSE':replacement.lines.some(line=>line.account==='capital'&&line.credit>0)?'CAPITAL':amount>0?'INCOME':'JOURNAL',entry.id);
+      await db.prepare('UPDATE wallet_entries SET amount=?,kind=? WHERE id=?').run(amount,['INCOME','EXPENSE','CAPITAL'].includes(entry.kind)?(amount<0?'EXPENSE':replacement.lines.some(line=>line.account==='capital'&&line.credit>0)?'CAPITAL':amount>0?'INCOME':'JOURNAL'):entry.kind,entry.id);
     }
     await syncWalletBalances(db,company.id,[...JSON.parse(old.lines),...replacement.lines]);
+    await registerManualWalletEntries(db,company.id,old.id,replacement.lines);
     return {...replacement,id:old.id,reason};
   }));
   route('GET','/accounting/journal/:id/history',async request=>{

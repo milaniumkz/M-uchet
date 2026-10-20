@@ -6,6 +6,9 @@ import 'backend/rest/repositories.dart';
 import 'workspace/project_repository.dart';
 import 'workspace/company_settings_dialog.dart';
 import 'workspace/money_entries_dialog.dart';
+import 'workspace/commercial_workspace.dart';
+import 'workspace/catalog_workspace.dart';
+import 'workspace/company_creation.dart';
 
 void main() => runApp(const AccountingWorkspace());
 const ink = Color(0xFF171B35),
@@ -35,9 +38,18 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   List<Map<String, dynamic>> projects = [];
   Map<String, dynamic>? report;
   String? selected, error;
+  String section = 'projects';
+  final sections = const {
+    'projects': 'Проекты',
+    'sales': 'Продажи',
+    'purchases': 'Покупки',
+    'counterparties': 'Контрагенты',
+    'catalog': 'Товары и услуги'
+  };
   DateTimeRange? period;
   String date(DateTime value) => value.toIso8601String().substring(0, 10);
   bool busy = false;
+  bool creatingCompany = false;
   ProjectRepository get repository => ProjectRepository(api, company!.id);
   @override
   void dispose() {
@@ -48,7 +60,9 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   }
 
   Future<void> perform(Future<void> Function() action) async {
-    if (busy) return;
+    if (busy) {
+      return;
+    }
     setState(() {
       busy = true;
       error = null;
@@ -59,7 +73,9 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
       if (mounted) {
         setState(() {
           error = e.message;
-          if (!api.authenticated) company = null;
+          if (!api.authenticated) {
+            company = null;
+          }
         });
       }
     } catch (_) {
@@ -69,7 +85,9 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
         });
       }
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() => busy = false);
+      }
     }
   }
 
@@ -86,11 +104,26 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
         await identity.login(login.text.trim(), password.text);
         password.clear();
         companies = await identity.companies();
-        if (companies.isEmpty) throw const BackendException('no_company');
+        if (companies.isEmpty) {
+          creatingCompany = true;
+          return;
+        }
         company = companies.first;
         selected = null;
         await refresh();
       });
+  void companyCreated(CompanyDto created) {
+    setState(() {
+      companies = [...companies, created];
+      company = created;
+      creatingCompany = false;
+      report = null;
+      projects = [];
+      selected = null;
+    });
+    perform(refresh);
+  }
+
   Future<void> companySettings() async {
     await showDialog<bool>(
         context: navigator.currentContext!,
@@ -208,7 +241,9 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
           .request('GET', ['v1', 'companies', company!.id, 'wallets']));
       wallets = (response['items'] as List).map(jsonObject).toList();
     });
-    if (error != null || !mounted) return;
+    if (error != null || !mounted) {
+      return;
+    }
     if (wallets.isEmpty) {
       var name = '';
       final value = await showDialog<String>(
@@ -231,12 +266,16 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                         },
                         child: const Text('Создать'))
                   ]));
-      if (value == null) return;
+      if (value == null) {
+        return;
+      }
       await perform(() async {
         await api.request('POST', ['v1', 'companies', company!.id, 'wallets'],
             body: {'name': value}, operation: OperationKey());
       });
-      if (error == null) await addTransaction();
+      if (error == null) {
+        await addTransaction();
+      }
       return;
     }
     var walletId =
@@ -415,8 +454,25 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                       horizontal: 24, vertical: 20)))),
       home: Builder(
           builder: (context) => Scaffold(
-              body: company == null ? authView() : workspace(),
-              floatingActionButton: company == null ? null : FloatingActionButton(onPressed: busy ? null : createProject, tooltip: 'Создать проект', child: const Icon(Icons.add)))));
+              body: creatingCompany && api.authenticated
+                  ? CompanyCreation(
+                      api: api,
+                      onCreated: companyCreated,
+                      onCancel: () {
+                        if (company == null) {
+                          logout();
+                        }
+                        setState(() => creatingCompany = false);
+                      })
+                  : company == null
+                      ? authView()
+                      : workspace(),
+              floatingActionButton: company == null || creatingCompany || section != 'projects'
+                  ? null
+                  : FloatingActionButton(
+                      onPressed: busy ? null : createProject,
+                      tooltip: 'Создать проект',
+                      child: const Icon(Icons.add)))));
   Widget authView() => LayoutBuilder(
       builder: (context, constraints) => constraints.maxWidth >= 1100 &&
               constraints.maxHeight >= 700
@@ -682,44 +738,170 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                     ])))));
   }
 
-  Widget workspace() => LayoutBuilder(
+  Widget navigation() => Container(
+      width: 222,
+      color: Colors.white,
+      padding: const EdgeInsets.all(24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('М-УЧЁТ',
+            style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 32),
+        Text(company!.name,
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 24),
+        ...sections.entries.map((entry) => ListTile(
+            contentPadding: EdgeInsets.zero,
+            selected: section == entry.key,
+            selectedColor: accent,
+            leading: Icon(switch (entry.key) {
+              'projects' => Icons.folder_outlined,
+              'sales' => Icons.receipt_long_outlined,
+              'purchases' => Icons.shopping_bag_outlined,
+              'counterparties' => Icons.people_outline,
+              _ => Icons.inventory_2_outlined
+            }),
+            title: Text(entry.value, style: const TextStyle(fontSize: 13)),
+            onTap: busy ? null : () => setState(() => section = entry.key))),
+        const Spacer(),
+        TextButton.icon(
+            onPressed:
+                busy ? null : () => setState(() => creatingCompany = true),
+            icon: const Icon(Icons.add_business_outlined),
+            label: const Text('Добавить фирму')),
+        TextButton.icon(
+            onPressed: busy ? null : companySettings,
+            icon: const Icon(Icons.business_outlined),
+            label: const Text('Фирма')),
+        TextButton(onPressed: busy ? null : logout, child: const Text('Выйти'))
+      ]));
+  Widget sectionPicker() => Row(mainAxisSize: MainAxisSize.min, children: [
+        IconButton(
+            tooltip: 'Добавить фирму',
+            onPressed:
+                busy ? null : () => setState(() => creatingCompany = true),
+            icon: const Icon(Icons.add_business_outlined)),
+        Expanded(
+            child: DropdownButton<String>(
+                value: section,
+                isExpanded: true,
+                items: sections.entries
+                    .map((e) =>
+                        DropdownMenuItem(value: e.key, child: Text(e.value)))
+                    .toList(),
+                onChanged:
+                    busy ? null : (value) => setState(() => section = value!)))
+      ]);
+  Widget workspace() {
+    if (section == 'projects') {
+      return projectWorkspace();
+    }
+    return LayoutBuilder(
+        builder: (context, size) => Row(children: [
+              if (size.maxWidth >= 1000) navigation(),
+              Expanded(
+                  child: Column(children: [
+                Container(
+                    width: double.infinity,
+                    color: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 33, vertical: 16),
+                    child: Wrap(
+                        spacing: 20,
+                        runSpacing: 12,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (size.maxWidth < 1000)
+                            SizedBox(width: 200, child: sectionPicker()),
+                          SizedBox(
+                              width: 250,
+                              child: DropdownButton<String>(
+                                  value: company!.id,
+                                  isExpanded: true,
+                                  items: companies
+                                      .map((c) => DropdownMenuItem(
+                                          value: c.id,
+                                          child: Text(c.name,
+                                              overflow: TextOverflow.ellipsis)))
+                                      .toList(),
+                                  onChanged: busy
+                                      ? null
+                                      : (id) => perform(() async {
+                                            company = companies
+                                                .firstWhere((c) => c.id == id);
+                                            selected = null;
+                                            await refresh();
+                                          }))),
+                          SizedBox(
+                              width: 240,
+                              child: DropdownButton<String>(
+                                  value: selected ?? 'all',
+                                  isExpanded: true,
+                                  items: [
+                                    const DropdownMenuItem(
+                                        value: 'all', child: Text('Вся фирма')),
+                                    const DropdownMenuItem(
+                                        value: 'unassigned',
+                                        child: Text('Общие операции')),
+                                    ...projects.map((p) => DropdownMenuItem(
+                                        value: p['id'] as String,
+                                        child: Text(p['name'] as String,
+                                            overflow: TextOverflow.ellipsis)))
+                                  ],
+                                  onChanged: busy
+                                      ? null
+                                      : (id) => perform(() async {
+                                            selected = id == 'all' ? null : id;
+                                            await refresh();
+                                          }))),
+                          TextButton.icon(
+                              onPressed: busy ? null : choosePeriod,
+                              icon: const Icon(Icons.date_range),
+                              label: Text(period == null
+                                  ? 'За всё время'
+                                  : '${date(period!.start)} — ${date(period!.end)}')),
+                          if (size.maxWidth < 1000)
+                            IconButton(
+                                tooltip: 'Фирма',
+                                onPressed: busy ? null : companySettings,
+                                icon: const Icon(Icons.business_outlined))
+                        ])),
+                if (busy) const LinearProgressIndicator(),
+                if (error != null)
+                  Text(error!, style: const TextStyle(color: Colors.red)),
+                Expanded(
+                    child: ['sales', 'purchases'].contains(section)
+                        ? CommercialWorkspace(
+                            key: ValueKey(
+                                '${company!.id}:$selected:$section:$period'),
+                            api: api,
+                            companyId: company!.id,
+                            currency: company!.currency,
+                            direction: section,
+                            projects: projects,
+                            projectId: selected,
+                            from: period == null ? null : date(period!.start),
+                            to: period == null ? null : date(period!.end),
+                            onChanged: refresh)
+                        : CatalogWorkspace(
+                            key: ValueKey('${company!.id}:$section'),
+                            api: api,
+                            companyId: company!.id,
+                            mode: section))
+              ]))
+            ]));
+  }
+
+  Widget projectWorkspace() => LayoutBuilder(
       builder: (context, size) => Row(children: [
-            if (size.maxWidth >= 1000)
-              Container(
-                  width: 222,
-                  color: Colors.white,
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('М-УЧЁТ',
-                            style: TextStyle(
-                                fontSize: 25, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 40),
-                        Text(company!.name,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 36),
-                        const ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(Icons.folder_outlined, color: accent),
-                            title: Text('Проекты',
-                                style: TextStyle(color: accent))),
-                        const Spacer(),
-                        TextButton(
-                            onPressed: busy
-                                ? null
-                                : () => perform(() async {
-                                      await IdentityRepository(api).logout();
-                                      company = null;
-                                      report = null;
-                                    }),
-                            child: const Text('Выйти'))
-                      ])),
+            if (size.maxWidth >= 1000) navigation(),
             Expanded(
                 child: ListView(
                     padding: EdgeInsets.all(size.maxWidth < 600 ? 20 : 33),
                     children: [
+                  if (size.maxWidth < 1000)
+                    Padding(
+                        padding: const EdgeInsets.only(bottom: 20),
+                        child: SizedBox(width: 240, child: sectionPicker())),
                   const Text('Бизнес под контролем',
                       style:
                           TextStyle(fontSize: 29, fontWeight: FontWeight.bold)),

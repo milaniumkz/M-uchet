@@ -10,8 +10,9 @@ import { writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { openDatabase, transaction } from './db.js';
 import { hashPassword, verifyPassword, newToken, hashToken, fail, text, integer, scope, businessDate } from './security.js';
-import { postJournal, allocate, orderInput, projectReference } from './accounting.js';
+import { postJournal, allocate, orderInput, projectReference, registerManualWalletEntries } from './accounting.js';
 import { kinds, permissions } from './resources.js';
+import { registerCommercialRoutes } from './commercial.js';
 import { registerBusinessRoutes } from './business.js';
 
 const now = () => new Date().toISOString();
@@ -156,12 +157,28 @@ export async function createApp(options = {}) {
   app.post('/v1/companies', { preHandler: auth }, async (request, reply) => {
     const body = object(request.body), name = text(body.name, 'name');
     if (!/^[A-Z]{3}$/.test(body.currency ?? '')) fail(400, 'invalid_currency');
-    const id = randomUUID();
-    (await transaction(db, async () => {
-      (await db.prepare('INSERT INTO companies(id,name,currency,created_at) VALUES(?,?,?,?)').run(id, name, body.currency, now()));
-      (await db.prepare("INSERT INTO memberships VALUES(?,?,'owner','[]')").run(id, request.user.id));
-    }));
-    reply.code(201); return { id, name, currency: body.currency };
+    const key = request.headers['idempotency-key'] === undefined ? null : text(request.headers['idempotency-key'], 'idempotency_key', 128);
+    const fingerprint = hashToken(JSON.stringify([request.method, request.url, body]));
+    const result = await transaction(db, async () => {
+      // Lock the existing actor row even when this is their first company.
+      await db.prepare('SELECT id FROM users WHERE id=? FOR UPDATE').get(request.user.id);
+      if (key) {
+        const previous = await db.prepare('SELECT * FROM user_commands WHERE actor_id=? AND key=?').get(request.user.id, key);
+        if (previous) {
+          if (previous.fingerprint !== fingerprint) fail(409, 'idempotency_conflict');
+          return JSON.parse(previous.response);
+        }
+      }
+      const id = randomUUID();
+      await db.prepare('INSERT INTO companies(id,name,currency,created_at) VALUES(?,?,?,?)').run(id, name, body.currency, now());
+      await db.prepare("INSERT INTO memberships VALUES(?,?,'owner','[]')").run(id, request.user.id);
+      const result = { id, name, currency: body.currency };
+      await db.prepare('INSERT INTO audit(company_id,actor_id,action,resource_id,created_at) VALUES(?,?,?,?,?)')
+        .run(id, request.user.id, 'company.create', id, now());
+      if (key) await db.prepare('INSERT INTO user_commands VALUES(?,?,?,?,?)').run(request.user.id, key, fingerprint, JSON.stringify(result), now());
+      return result;
+    });
+    reply.code(201); return result;
   });
   app.get('/v1/companies/:companyId/members', { preHandler: auth }, async request => {
     (await owner(request));
@@ -217,21 +234,25 @@ export async function createApp(options = {}) {
   app.post('/v1/companies/:companyId/resources/:kind', { preHandler: auth }, async request => {
     (await resourceAccess(request, 'write'));
     const data = documentData(object(request.body)), id = randomUUID(), timestamp = now();
-    return (await transaction(db, async () => {
-      (await db.prepare('INSERT INTO documents VALUES(?,?,?,?,1,?,?)').run(request.params.companyId, request.params.kind, id, data, timestamp, timestamp));
-      (await audit(request, `resource.${request.params.kind}.create`, id));
-      return { id, data: JSON.parse(data), version: 1, createdAt: timestamp, updatedAt: timestamp };
-    }));
+    const write=async()=>{
+      await db.prepare('INSERT INTO documents VALUES(?,?,?,?,1,?,?)').run(request.params.companyId,request.params.kind,id,data,timestamp,timestamp);
+      return {id,data:JSON.parse(data),version:1,createdAt:timestamp,updatedAt:timestamp};
+    };
+    if(request.headers['idempotency-key'])return command(request,`${kinds[request.params.kind]}.write`,`resource.${request.params.kind}.create`,write);
+    return transaction(db,async()=>{const result=await write();await audit(request,`resource.${request.params.kind}.create`,id);return result;});
   });
   app.put('/v1/companies/:companyId/resources/:kind/:id', { preHandler: auth }, async request => {
     (await resourceAccess(request, 'write'));
     const body = object(request.body), data = documentData(body), version = integer(body.version, 'version', 1);
-    return (await transaction(db, async () => {
-      const result = (await db.prepare(`UPDATE documents SET data=?,version=version+1,updated_at=? WHERE company_id=? AND kind=? AND id=? AND version=?`).run(data, now(), request.params.companyId, request.params.kind, request.params.id, version));
-      if (!result.changes) fail(409, 'version_conflict');
-      (await audit(request, `resource.${request.params.kind}.update`, request.params.id));
-      return { id: request.params.id, data: JSON.parse(data), version: version + 1 };
-    }));
+    const write=async()=>{
+      const old=await db.prepare('SELECT * FROM documents WHERE company_id=? AND kind=? AND id=? AND version=? FOR UPDATE').get(request.params.companyId,request.params.kind,request.params.id,version);
+      if(!old)fail(409,'version_conflict');
+      await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(request.params.companyId,request.params.kind,old.id,JSON.stringify(old),request.user.id);
+      await db.prepare('UPDATE documents SET data=?,version=version+1,updated_at=? WHERE company_id=? AND kind=? AND id=?').run(data,now(),request.params.companyId,request.params.kind,request.params.id);
+      return {id:old.id,data:JSON.parse(data),version:version+1};
+    };
+    if(request.headers['idempotency-key'])return command(request,`${kinds[request.params.kind]}.write`,`resource.${request.params.kind}.update`,write);
+    return transaction(db,async()=>{const result=await write();await audit(request,`resource.${request.params.kind}.update`,request.params.id);return result;});
   });
 
   app.post('/v1/companies/:companyId/inventory/receipts', { preHandler: auth }, async request => (await command(request, 'inventory.receive', 'inventory.receive', async company => {
@@ -319,7 +340,8 @@ export async function createApp(options = {}) {
   app.post('/v1/companies/:companyId/accounting/journal', { preHandler: auth }, async request => command(request, 'accounting.post', 'journal.post', async company => {
     const body = object(request.body);
     if(Array.isArray(body.lines)&&body.lines.some(line=>typeof line?.account==='string'&&line.account.startsWith('wallet:')))await access(request,'wallets.transact');
-    return postJournal(db, company, { ...body, description: `Manual: ${text(body.description, 'description', 490)}` });
+    const entry=await postJournal(db,company,{...body,description:`Manual: ${text(body.description,'description',490)}`});
+    await registerManualWalletEntries(db,company.id,entry.id,entry.lines);return entry;
   }));
   app.get('/v1/companies/:companyId/accounting/journal', { preHandler: auth }, async request => {
     (await access(request, 'accounting.read'));
@@ -356,7 +378,7 @@ export async function createApp(options = {}) {
     await writeFile(resolve(fileDir, id), data, { flag: 'wx', mode: 0o600 });
     try {
       (await transaction(db, async () => {
-        (await db.prepare('INSERT INTO files VALUES(?,?,?,?,?,?)').run(id, request.params.companyId, text(part.filename, 'filename', 255), part.mimetype, data.length, now()));
+        (await db.prepare('INSERT INTO files VALUES(?,?,?,?,?,?)').run(id, request.params.companyId, text(part.filename.replace(/[\\/\x00-\x1F]/g,'_'), 'filename', 255), part.mimetype, data.length, now()));
         (await audit(request, 'file.upload', id));
       }));
     } catch (error) { await unlink(resolve(fileDir, id)); throw error; }
@@ -369,6 +391,7 @@ export async function createApp(options = {}) {
     reply.type('application/octet-stream').header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
+  registerCommercialRoutes(app, { db, auth, access, command, pageLimit, object });
   registerBusinessRoutes(app, { db, auth, access, command, pageLimit, object, audit });
   if (options.webRoot) await app.register(staticFiles, {root:resolve(options.webRoot),dotfiles:'deny',index:'index.html',cacheControl:true,maxAge:0});
   await app.ready();

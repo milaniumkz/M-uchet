@@ -11,7 +11,13 @@ class CompanySettingsDialog extends StatefulWidget {
 }
 
 class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
-  final name = TextEditingController(), identifier = TextEditingController();
+  final name = TextEditingController(),
+      identifier = TextEditingController(),
+      address = TextEditingController(),
+      iban = TextEditingController(),
+      bic = TextEditingController(),
+      director = TextEditingController(),
+      accountant = TextEditingController();
   String? legalForm, taxRegime, error;
   bool loading = true, saving = false, vat = false;
   int version = 0;
@@ -26,6 +32,11 @@ class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
   void dispose() {
     name.dispose();
     identifier.dispose();
+    address.dispose();
+    iban.dispose();
+    bic.dispose();
+    director.dispose();
+    accountant.dispose();
     super.dispose();
   }
 
@@ -37,6 +48,11 @@ class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
       setState(() {
         name.text = data['legal_name'] as String;
         identifier.text = data['identifier'] as String? ?? '';
+        address.text = data['legal_address'] as String? ?? '';
+        iban.text = data['bank_iban'] as String? ?? '';
+        bic.text = data['bank_bic'] as String? ?? '';
+        director.text = data['director_name'] as String? ?? '';
+        accountant.text = data['accountant_name'] as String? ?? '';
         legalForm = data['legal_form'] as String?;
         taxRegime = data['tax_regime'] as String?;
         vat = data['vat_registered'] as bool;
@@ -70,7 +86,12 @@ class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
         'identifier': identifier.text,
         'legalForm': legalForm,
         'taxRegime': taxRegime,
-        'vatRegistered': vat
+        'vatRegistered': vat,
+        'legalAddress': address.text,
+        'bankIban': iban.text,
+        'bankBic': bic.text,
+        'directorName': director.text,
+        'accountantName': accountant.text
       });
       if (mounted) Navigator.pop(context, true);
     } on BackendException catch (e) {
@@ -140,6 +161,31 @@ class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
                               onChanged: saving
                                   ? null
                                   : (v) => setState(() => vat = v)),
+                          const SizedBox(height: 16),
+                          TextField(
+                              controller: address,
+                              decoration: const InputDecoration(
+                                  labelText: 'Юридический адрес')),
+                          const SizedBox(height: 16),
+                          TextField(
+                              controller: iban,
+                              decoration: const InputDecoration(
+                                  labelText: 'Банковский счёт IBAN')),
+                          const SizedBox(height: 16),
+                          TextField(
+                              controller: bic,
+                              decoration: const InputDecoration(
+                                  labelText: 'БИК банка')),
+                          const SizedBox(height: 16),
+                          TextField(
+                              controller: director,
+                              decoration: const InputDecoration(
+                                  labelText: 'Руководитель: ФИО')),
+                          const SizedBox(height: 16),
+                          TextField(
+                              controller: accountant,
+                              decoration: const InputDecoration(
+                                  labelText: 'Бухгалтер: ФИО')),
                           const SizedBox(height: 16),
                           const Text(
                               'Выбор режима не подтверждает право на его применение. Проверьте условия и дату перехода.'),

@@ -36,6 +36,14 @@ export async function syncWalletBalances(db,companyId,lines) {
   }
 }
 
+export async function registerManualWalletEntries(db,companyId,journalId,lines,kind='MANUAL') {
+ const totals=new Map();for(const line of lines)if(line.account.startsWith('wallet:')){const id=line.account.slice(7);totals.set(id,(totals.get(id)??0)+line.debit-line.credit);}
+ for(const [walletId,amount]of totals){
+  const existing=await db.prepare('SELECT id FROM wallet_entries WHERE company_id=? AND wallet_id=? AND journal_id=?').get(companyId,walletId,journalId);
+  if(!existing&&amount)await db.prepare('INSERT INTO wallet_entries(id,company_id,wallet_id,amount,kind,reference_id,created_at,journal_id) VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(),companyId,walletId,amount,kind,journalId,new Date().toISOString(),journalId);
+ }
+}
+
 export async function postJournal(db, company, input) {
   const projectId = await projectReference(db, company.id, input.projectId);
   const ledgerScope = scope(input.scope);

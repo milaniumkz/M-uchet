@@ -6,7 +6,7 @@ import { mkdtemp,open,rm,cp,mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import { createApp } from '../src/app.js';
-import { openDatabase } from '../src/db.js';
+import pg from 'pg';
 const root=resolve(new URL('../..',import.meta.url).pathname);
 async function docker(args,input='ignore',output='ignore'){
  const process=spawn('docker',['compose','exec','-T','db',...args],{cwd:root,stdio:[input,output,'inherit']});
@@ -22,7 +22,7 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  let app=await createApp({schema,dataDir:source,allowRegistration:true}),restored,createdDB=false;
  t.after(async()=>{
   if(app)await app.close();if(restored)await restored.close();
-  const db=await openDatabase();try{await db.exec(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);}finally{await db.close();}
+  const cleanup=new pg.Pool({connectionString:process.env.DATABASE_URL});try{await cleanup.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);}finally{await cleanup.end();}
   if(createdDB)await docker(['dropdb','-U','muchet',restoreDB]);
   await rm(directory,{recursive:true,force:true});
  });
@@ -37,6 +37,12 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const prefix=`/v1/companies/${company.id}`;
  const journal=await request('POST',prefix+'/accounting/journal',{description:'Restore exact amount',lines:[{account:'cash',debit:123456789},{account:'capital',credit:123456789}]},session.token,{'idempotency-key':randomUUID()});
  const uploaded=await request('POST',prefix+'/files',Buffer.from('--testboundary\r\nContent-Disposition: form-data; name="file"; filename="synthetic.txt"\r\nContent-Type: text/plain\r\n\r\nSYNTHETIC RESTORE CONTENT\r\n--testboundary--\r\n'),session.token,{'content-type':'multipart/form-data; boundary=testboundary'});
+ const key=()=>({'idempotency-key':randomUUID()});
+ await request('PUT',prefix+'/settings',{version:0,legalName:'SYNTHETIC RESTORED FIRM',identifier:'000000000000',legalForm:'TOO',taxRegime:'GENERAL',vatRegistered:false},session.token,key());
+ const client=await request('POST',prefix+'/resources/clients',{data:{name:'SYNTHETIC RESTORE CLIENT',identifier:'000000000001'}},session.token,key());
+ const service=await request('POST',prefix+'/commercial-documents',{kind:'SALE_ACT',counterpartyId:client.id,items:[{description:'SYNTHETIC SERVICE',quantity:'1',unitPrice:12345}],businessDate:'2026-10-20'},session.token,key());
+ await request('POST',prefix+`/commercial-documents/${service.id}/post`,{},session.token,key());
+ await request('POST',prefix+`/commercial-documents/${service.id}/files`,{fileId:uploaded.id},session.token,key());
  await app.close();app=undefined;
  const dump=await open(join(directory,'backup.dump'),'wx',0o600);
  try{await docker(['pg_dump','-U','muchet','-d','muchet',`--schema=${schema}`,'--format=custom','--no-owner','--no-acl'],'ignore',dump.fd);}finally{await dump.close();}
@@ -51,5 +57,7 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const entries=(await restored.inject({url:prefix+'/accounting/journal',headers})).json().items;
  assert.equal(entries.find(e=>e.id===journal.id).lines[0].debit,123456789);
  assert.equal((await restored.db.prepare('SELECT debit FROM journal_lines WHERE entry_id=? AND position=0').get(journal.id)).debit,123456789);
+ const doc=(await restored.inject({url:prefix+`/commercial-documents/${service.id}`,headers})).json();assert.equal(doc.status,'POSTED');assert.equal(doc.data.total,12345);
+ const links=(await restored.inject({url:prefix+`/commercial-documents/${service.id}/files`,headers})).json().items;assert.equal(links[0].id,uploaded.id);
  const file=await restored.inject({url:prefix+'/files/'+uploaded.id,headers});assert.equal(file.body,'SYNTHETIC RESTORE CONTENT');
 });

@@ -57,6 +57,12 @@ export async function openDatabase({ connectionString = process.env.DATABASE_URL
       if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=8').get()) {
         await db.exec(await readFile(new URL('../migrations/007_wallet_transaction_edits.sql', import.meta.url), 'utf8'));
       }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=9').get()) {
+        await db.exec(await readFile(new URL('../migrations/008_commercial_documents.sql', import.meta.url), 'utf8'));
+      }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=10').get()) {
+        await db.exec(await readFile(new URL('../migrations/009_company_creation_commands.sql', import.meta.url), 'utf8'));
+      }
     });
     return db;
   } catch (error) { await pool.end(); throw error; }
