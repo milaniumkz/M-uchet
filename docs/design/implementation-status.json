@@ -1,0 +1,325 @@
+{
+  "updated": "2026-10-20",
+  "complete": false,
+  "meaning": "partial означает работающий описанный сценарий, а не полное визуальное или функциональное соответствие макету",
+  "screens": [
+    {
+      "id": "D-01",
+      "title": "Бизнес под контролем",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/main_server.dart",
+      "implemented_scope": "Проекты, сводка, период и денежные операции"
+    },
+    {
+      "id": "D-02",
+      "title": "Вход",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/main_server.dart",
+      "implemented_scope": "Вход в независимый API"
+    },
+    {
+      "id": "D-03",
+      "title": "Восстановление доступа",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/recovery_dialog.dart",
+      "implemented_scope": "Одноразовый код администратора, смена пароля и отзыв сессий; email-доставка и точная компоновка D-03 ещё не выполнены"
+    },
+    {
+      "id": "D-04",
+      "title": "Настроим учёт под ваш бизнес",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/company_creation.dart",
+      "implemented_scope": "Создание фирмы и настройки реквизитов; полная компоновка D-04 ещё не выполнена"
+    },
+    {
+      "id": "D-05",
+      "title": "Документы продаж",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/commercial_workspace.dart",
+      "implemented_scope": "Список услуг, фильтры, серверные итоги, поиск, пагинация"
+    },
+    {
+      "id": "D-06",
+      "title": "Новый счёт на оплату",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/commercial_editor.dart",
+      "implemented_scope": "Редактор счёта услуг и серверный расчёт"
+    },
+    {
+      "id": "D-07",
+      "title": "Счёт № 024",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/commercial_detail.dart",
+      "implemented_scope": "Счёт, аванс, акт, оплаты, история, PDF, файлы"
+    },
+    {
+      "id": "D-08",
+      "title": "Акт выполненных работ № 019",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/commercial_detail.dart",
+      "implemented_scope": "Акт услуг, изменение проведённого документа и оплат"
+    },
+    {
+      "id": "D-09",
+      "title": "Накладная № 014",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-10",
+      "title": "Электронный счёт-фактура",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-11",
+      "title": "Покупки и расходы",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/commercial_workspace.dart",
+      "implemented_scope": "Покупки услуг; товары ещё отдельный FIFO-процесс"
+    },
+    {
+      "id": "D-12",
+      "title": "Загрузить банковскую выписку",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/bank_workspace.dart",
+      "implemented_scope": "CSV UTF-8, выбор счёта/колонок, предварительная проверка и дубли"
+    },
+    {
+      "id": "D-13",
+      "title": "Сопоставить операции",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/bank_workspace.dart",
+      "implemented_scope": "Ручное сопоставление проекта/документа, подтверждение, переход к исправлению"
+    },
+    {
+      "id": "D-14",
+      "title": "Касса",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/main_server.dart",
+      "implemented_scope": "Денежные счета и операции; полный экран кассы и смены ещё не перенесены"
+    },
+    {
+      "id": "D-15",
+      "title": "Контрагенты",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/catalog_workspace.dart",
+      "implemented_scope": "Клиенты и поставщики с версионным редактированием"
+    },
+    {
+      "id": "D-16",
+      "title": "ТОО «Алатау Сервис»",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/catalog_workspace.dart",
+      "implemented_scope": "Реквизиты контрагента; полная карточка взаиморасчётов ещё не выполнена"
+    },
+    {
+      "id": "D-17",
+      "title": "Товары и услуги",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/catalog_workspace.dart",
+      "implemented_scope": "Товары, услуги и склады"
+    },
+    {
+      "id": "D-18",
+      "title": "Складские остатки",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/inventory_workspace.dart",
+      "implemented_scope": "FIFO-партии, резерв, остаток, поступление, перемещение, списание"
+    },
+    {
+      "id": "D-19",
+      "title": "Сотрудники",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-20",
+      "title": "Расчёт зарплаты",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-21",
+      "title": "Основные средства",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-22",
+      "title": "Налоговый календарь",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-23",
+      "title": "Подготовить отчёт",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-24",
+      "title": "Проверка перед формированием",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-25",
+      "title": "Финансовые отчёты",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/ledger_workspace.dart",
+      "implemented_scope": "Прибыль/убытки, ОСВ, период, проект, контур, CSV, расшифровка счёта"
+    },
+    {
+      "id": "D-26",
+      "title": "Бухгалтерские записи",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/ledger_workspace.dart",
+      "implemented_scope": "Создание/редактирование записей с историей и переходом к документу-основанию"
+    },
+    {
+      "id": "D-27",
+      "title": "Закрытие месяца",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/ledger_workspace.dart",
+      "implemented_scope": "Состояния месяцев; автоматические регламентные расчёты ещё не реализованы"
+    },
+    {
+      "id": "D-28",
+      "title": "Настройки компании",
+      "platform": "desktop",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/company_settings_dialog.dart",
+      "implemented_scope": "Реквизиты фирмы, режим, НДС, банковские данные"
+    },
+    {
+      "id": "D-29",
+      "title": "Интеграции",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "D-30",
+      "title": "Поможем разобраться",
+      "platform": "desktop",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "M-01",
+      "title": "Главная в кармане",
+      "platform": "mobile",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/main_server.dart",
+      "implemented_scope": "Адаптивные проекты и общая сводка"
+    },
+    {
+      "id": "M-02",
+      "title": "Документы без таблиц",
+      "platform": "mobile",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/commercial_workspace.dart",
+      "implemented_scope": "Карточки документов вместо таблицы"
+    },
+    {
+      "id": "M-03",
+      "title": "Создание счёта по шагам",
+      "platform": "mobile",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/commercial_editor.dart",
+      "implemented_scope": "Адаптивная форма; пошаговая компоновка ещё не выполнена"
+    },
+    {
+      "id": "M-04",
+      "title": "Документ и его история",
+      "platform": "mobile",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/commercial_detail.dart",
+      "implemented_scope": "Карточка документа с историей и вложениями"
+    },
+    {
+      "id": "M-05",
+      "title": "Проверка платежа",
+      "platform": "mobile",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/bank_workspace.dart",
+      "implemented_scope": "Адаптивное сопоставление платежа"
+    },
+    {
+      "id": "M-06",
+      "title": "Налоги без тревоги",
+      "platform": "mobile",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    },
+    {
+      "id": "M-07",
+      "title": "От цифры к документу",
+      "platform": "mobile",
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/ledger_workspace.dart",
+      "implemented_scope": "Отчёт → счёт → проводка → основание"
+    },
+    {
+      "id": "M-08",
+      "title": "Всё остальное рядом",
+      "platform": "mobile",
+      "status": "not_implemented",
+      "visual_parity_verified": false
+    }
+  ]
+}

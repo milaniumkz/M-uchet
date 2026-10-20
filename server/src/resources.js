@@ -15,5 +15,5 @@ export const permissions = [
   'wallets.read','wallets.write','wallets.transact','debts.read','debts.write','debts.settle',
   'shifts.read','shifts.write','devices.command','reports.read',
   'periods.close','periods.reopen','documents.read','documents.write','documents.post','documents.settle','documents.export',
-  'accounting.edit','orders.edit','projects.read','projects.write',
+  'bank.read','bank.import','bank.review','bank.post','accounting.edit','orders.edit','projects.read','projects.write',
 ];

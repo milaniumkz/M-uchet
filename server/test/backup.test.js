@@ -43,6 +43,11 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const service=await request('POST',prefix+'/commercial-documents',{kind:'SALE_ACT',counterpartyId:client.id,items:[{description:'SYNTHETIC SERVICE',quantity:'1',unitPrice:12345}],businessDate:'2026-10-20'},session.token,key());
  await request('POST',prefix+`/commercial-documents/${service.id}/post`,{},session.token,key());
  await request('POST',prefix+`/commercial-documents/${service.id}/files`,{fileId:uploaded.id},session.token,key());
+ const bankWallet=await request('POST',prefix+'/wallets',{name:'SYNTHETIC RESTORE BANK'},session.token,key());
+ const statement=await request('POST',prefix+'/bank-imports',{walletId:bankWallet.id,csv:'date;reference;debit;credit;description\n2026-10-20;restore-bank-1;0;12.34;SYNTHETIC RESTORE PAYMENT'},session.token,key());
+ const bankRows=(await request('GET',prefix+`/bank-imports/${statement.id}`,undefined,session.token)).items;
+ await request('PUT',prefix+`/bank-imports/${statement.id}/rows/${bankRows[0].id}`,{version:1,classification:'CAPITAL'},session.token,key());
+ await request('POST',prefix+`/bank-imports/${statement.id}/rows/${bankRows[0].id}/post`,{version:2},session.token,key());
  await app.close();app=undefined;
  const dump=await open(join(directory,'backup.dump'),'wx',0o600);
  try{await docker(['pg_dump','-U','muchet','-d','muchet',`--schema=${schema}`,'--format=custom','--no-owner','--no-acl'],'ignore',dump.fd);}finally{await dump.close();}
@@ -59,5 +64,7 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  assert.equal((await restored.db.prepare('SELECT debit FROM journal_lines WHERE entry_id=? AND position=0').get(journal.id)).debit,123456789);
  const doc=(await restored.inject({url:prefix+`/commercial-documents/${service.id}`,headers})).json();assert.equal(doc.status,'POSTED');assert.equal(doc.data.total,12345);
  const links=(await restored.inject({url:prefix+`/commercial-documents/${service.id}/files`,headers})).json().items;assert.equal(links[0].id,uploaded.id);
+ const bankCopy=(await restored.inject({url:prefix+`/bank-imports/${statement.id}`,headers})).json();assert.equal(bankCopy.items[0].external_id,'restore-bank-1');assert.ok(bankCopy.items[0].journal_id);
+ const wallets=(await restored.inject({url:prefix+'/wallets',headers})).json().items;assert.equal(wallets.find(w=>w.id===bankWallet.id).balance,1234);
  const file=await restored.inject({url:prefix+'/files/'+uploaded.id,headers});assert.equal(file.body,'SYNTHETIC RESTORE CONTENT');
 });

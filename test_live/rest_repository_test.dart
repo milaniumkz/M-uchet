@@ -9,8 +9,9 @@ void main() {
       'Dart repositories use real API and PostgreSQL for a sale and later edit',
       () async {
     final fixturePath = Platform.environment['MUCHET_TEST_FIXTURE'];
-    if (fixturePath == null)
+    if (fixturePath == null) {
       fail('Run make test-client-e2e; no mock fallback is provided.');
+    }
     final fixture =
         jsonObject(jsonDecode(await File(fixturePath).readAsString()));
     final client =

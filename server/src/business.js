@@ -267,7 +267,9 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     };
     const from = date(request.query.from, '0001-01-01'), to = date(request.query.to, '9999-12-31');
     if (from > to) fail(400, 'invalid_date_range');
-    const rows = (await db.prepare("SELECT lines FROM journal WHERE company_id=? AND (scope=? OR scope='BOTH') AND business_date>=? AND business_date<=?").all(request.params.companyId, ledgerScope, from, to));
+    const selected=request.query.projectId;
+    if(selected!==undefined&&selected!=='unassigned')await projectReference(db,request.params.companyId,selected);
+    const rows=await db.prepare(`SELECT lines FROM journal WHERE company_id=? AND (scope=? OR scope='BOTH') AND business_date>=? AND business_date<=?${selected===undefined?'':' AND project_id IS NOT DISTINCT FROM ?'}`).all(request.params.companyId,ledgerScope,from,to,...(selected===undefined?[]:[selected==='unassigned'?null:selected]));
     let revenue = 0, cogs = 0, expenses = 0;
     for (const row of rows) for (const line of JSON.parse(row.lines)) {
       if (line.account === 'revenue') revenue += line.credit - line.debit;
@@ -276,6 +278,18 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     }
     for (const amount of [revenue,cogs,expenses,revenue-cogs-expenses]) if (!Number.isSafeInteger(amount)) fail(422, 'report_amount_overflow');
     return { scope: ledgerScope, from, to, revenue, cogs, grossProfit: revenue-cogs, expenses, netProfit: revenue-cogs-expenses };
+  });
+  route('GET','/periods',async request=>{
+    const company=await access(request,'accounting.read');
+    return {items:await db.prepare('SELECT * FROM accounting_periods WHERE company_id=? ORDER BY month DESC').all(company.id)};
+  });
+  route('GET','/accounting/journal/:id',async request=>{
+    const company=await access(request,'accounting.read');
+    const row=await db.prepare('SELECT * FROM journal WHERE company_id=? AND id=?').get(company.id,request.params.id);
+    if(!row)fail(404,'journal_not_found');
+    const source=await commercialSource(company.id,row.id);
+    const revision=(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(row.id)).n;
+    return {...row,revision,lines:JSON.parse(row.lines),sourceDocumentId:source?.document_id??null};
   });
   for (const [operation,status,permission] of [['close','CLOSED','periods.close'],['reopen','OPEN','periods.reopen']]) {
     route('POST', `/periods/:month/${operation}`, async request => command(request, permission, `period.${operation}`, async company => {
@@ -306,6 +320,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const old=await db.prepare('SELECT * FROM journal WHERE company_id=? AND id=?').get(company.id,request.params.id);
     if(!old)fail(404,'journal_not_found');
     const body=object(request.body),reason=body.reason===undefined?'Owner requested edit':text(body.reason,'reason',500);
+    if(body.expectedRevision!==undefined&&body.expectedRevision!==(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(old.id)).n)fail(409,'version_conflict');
     await db.prepare("SELECT set_config('app.edit_reason',?,true)").get(reason);
     const replacement={id:old.id,projectId:await projectReference(db,company.id,Object.hasOwn(body,'projectId')?body.projectId:old.project_id),scope:scope(body.scope??old.scope),description:text(body.description??old.description,'description',500),businessDate:businessDate(body.businessDate??old.business_date,company.timezone),lines:normalizeLines({lines:body.lines??JSON.parse(old.lines)})};
     if(await commercialSource(company.id,old.id)&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');

@@ -13,6 +13,8 @@ import { hashPassword, verifyPassword, newToken, hashToken, fail, text, integer,
 import { postJournal, allocate, orderInput, projectReference, registerManualWalletEntries } from './accounting.js';
 import { kinds, permissions } from './resources.js';
 import { registerCommercialRoutes } from './commercial.js';
+import { resetPassword } from './recovery.js';
+import { registerBankRoutes } from './banking.js';
 import { registerBusinessRoutes } from './business.js';
 
 const now = () => new Date().toISOString();
@@ -37,7 +39,7 @@ export async function createApp(options = {}) {
     components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } } },
     transform({schema,url,route}) {
       const documented={...schema};
-      if(url.startsWith('/v1/')&&!['/v1/auth/login','/v1/auth/register'].includes(url))documented.security=[{bearerAuth:[]}];
+      if(url.startsWith('/v1/')&&!['/v1/auth/login','/v1/auth/register','/v1/auth/reset-password'].includes(url))documented.security=[{bearerAuth:[]}];
       if(['POST','PUT'].includes(route.method)&&!url.endsWith('/files'))documented.body={type:'object',additionalProperties:true,description:'See docs/API.md and server/README.md for required fields; typed request schemas are pending.'};
       return {schema:documented,url};
     } });
@@ -122,6 +124,7 @@ export async function createApp(options = {}) {
     reply.code(201);
     return { id, login, name };
   });
+  app.post('/v1/auth/reset-password',{config:{rateLimit:{max:5,timeWindow:'1 minute'}}},request=>resetPassword(db,object(request.body)));
   app.post('/v1/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async request => {
     const body = object(request.body);
     const login = text(body.login, 'login', 254).toLowerCase();
@@ -268,7 +271,8 @@ export async function createApp(options = {}) {
   })));
   app.get('/v1/companies/:companyId/inventory', { preHandler: auth }, async request => {
     (await access(request, 'inventory.read'));
-    return { items: (await db.prepare('SELECT * FROM batches WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId, request.query.after ?? '', pageLimit(request.query))) };
+    const items=await db.prepare('SELECT * FROM batches WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId,request.query.after??'',pageLimit(request.query));
+    return {items,nextCursor:items.length===pageLimit(request.query)?items.at(-1).id:null};
   });
   app.post('/v1/companies/:companyId/orders', { preHandler: auth }, async request => (await command(request, 'orders.write', 'order.create', async company => {
     const parsed = (await orderInput(db, company.id, object(request.body)));
@@ -348,21 +352,28 @@ export async function createApp(options = {}) {
     const selected=request.query.projectId;
     if(selected!==undefined && selected!=='unassigned')await projectReference(db,request.params.companyId,selected);
     const filter=selected===undefined?'':' AND project_id IS NOT DISTINCT FROM ?';
-    return {items:(await db.prepare(`SELECT * FROM journal WHERE company_id=? AND id>?${filter} ORDER BY id LIMIT ?`).all(request.params.companyId,request.query.after??'',...(selected===undefined?[]:[selected==='unassigned'?null:selected]),pageLimit(request.query))).map(row=>({...row,lines:JSON.parse(row.lines)}))};
+    const from=businessDate(request.query.from??'0001-01-01'),to=businessDate(request.query.to??'9999-12-31');
+    if(from>to)fail(400,'invalid_date_range');
+    const ledger=request.query.scope===undefined?null:scope(request.query.scope),account=request.query.account===undefined?null:text(request.query.account,'account',64);
+    const rows=await db.prepare(`SELECT * FROM journal j WHERE company_id=? AND id>?${filter} AND business_date>=? AND business_date<=?${ledger?" AND (scope=? OR scope='BOTH')":''}${account?' AND EXISTS (SELECT 1 FROM journal_lines l WHERE l.entry_id=j.id AND l.account=?)':''} ORDER BY id LIMIT ?`)
+      .all(request.params.companyId,request.query.after??'',...(selected===undefined?[]:[selected==='unassigned'?null:selected]),from,to,...(ledger?[ledger]:[]),...(account?[account]:[]),pageLimit(request.query));
+    return {items:rows.map(row=>({...row,lines:JSON.parse(row.lines)})),nextCursor:rows.length===pageLimit(request.query)?rows.at(-1).id:null};
   });
   app.get('/v1/companies/:companyId/accounting/trial-balance', { preHandler: auth }, async request => {
     (await access(request, 'accounting.read'));
     const selectedScope = scope(request.query.scope);
-    // BOTH is a source entry included once in each individual ledger.
-    const rows = (await db.prepare("SELECT lines FROM journal WHERE company_id=? AND (scope=? OR scope='BOTH')").all(request.params.companyId, selectedScope));
-    const totals = new Map();
-    for (const row of rows) for (const line of JSON.parse(row.lines)) {
-      const current = totals.get(line.account) ?? { account: line.account, debit: 0, credit: 0 };
-      current.debit += line.debit; current.credit += line.credit;
-      if (!Number.isSafeInteger(current.debit) || !Number.isSafeInteger(current.credit)) fail(422, 'report_amount_overflow');
-      totals.set(line.account, current);
-    }
-    return { scope: selectedScope, accounts: [...totals.values()].map(row => ({ ...row, balance: row.debit - row.credit })) };
+    const from=businessDate(request.query.from??'0001-01-01'),to=businessDate(request.query.to??'9999-12-31');
+    if(from>to)fail(400,'invalid_date_range');
+    const project=request.query.projectId;
+    if(project!==undefined&&project!=='unassigned')await projectReference(db,request.params.companyId,project);
+    const rows=await db.prepare(`SELECT l.account,
+      sum(CASE WHEN j.business_date<? THEN l.debit-l.credit ELSE 0 END) AS opening,
+      sum(CASE WHEN j.business_date>=? THEN l.debit ELSE 0 END) AS debit,
+      sum(CASE WHEN j.business_date>=? THEN l.credit ELSE 0 END) AS credit,
+      sum(l.debit-l.credit) AS balance FROM journal_lines l JOIN journal j ON j.id=l.entry_id
+      WHERE j.company_id=? AND (j.scope=? OR j.scope='BOTH') AND j.business_date<=?${project===undefined?'':' AND j.project_id IS NOT DISTINCT FROM ?'}
+      GROUP BY l.account ORDER BY l.account`).all(from,from,from,request.params.companyId,selectedScope,to,...(project===undefined?[]:[project==='unassigned'?null:project]));
+    return {scope:selectedScope,from,to,projectId:project??null,accounts:rows};
   });
   app.get('/v1/companies/:companyId/audit', { preHandler: auth }, async request => {
     (await access(request, 'audit.read'));
@@ -391,7 +402,8 @@ export async function createApp(options = {}) {
     reply.type('application/octet-stream').header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
-  registerCommercialRoutes(app, { db, auth, access, command, pageLimit, object });
+  const commercial=registerCommercialRoutes(app, { db, auth, access, command, pageLimit, object });
+  registerBankRoutes(app, { db, auth, access, command, pageLimit, object, ...commercial });
   registerBusinessRoutes(app, { db, auth, access, command, pageLimit, object, audit });
   if (options.webRoot) await app.register(staticFiles, {root:resolve(options.webRoot),dotfiles:'deny',index:'index.html',cacheControl:true,maxAge:0});
   await app.ready();

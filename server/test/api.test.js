@@ -218,7 +218,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 10);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 12);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -637,4 +637,106 @@ test('company creation retries create one firm and never replay another owner re
  const second=await call('POST','/v1/companies',payload,other,key);assert.equal(second.status,201);assert.notEqual(second.body.id,results[0].body.id);
  assert.equal((await call('GET','/v1/companies',undefined,token)).body.length,1);
  assert.equal((await app.db.prepare("SELECT count(*) AS n FROM audit WHERE action='company.create' AND actor_id<> (SELECT id FROM users WHERE login='owner@example.test')").get()).n,2);
+});
+
+test('bank CSV preview, duplicate detection and reviewed posting keep exact project amounts', async t=>{
+ const f=await commercialFixture(t);
+ const csv='date;reference;debit;credit;description;counterparty\r\n20.10.2026;bank-1;;123,45;"Оплата; услуг";ТЕСТ\r\n2026-10-21;bank-2;23.45;;Комиссия;БАНК';
+ const input={csv,walletId:f.wallet.id,name:'SYNTHETIC STATEMENT'};
+ const largeCsv='date;reference;debit;credit;description;counterparty\n'+Array.from({length:400},(_,i)=>`2026-10-20;large-${i};0;1;${'d'.repeat(500)};${'p'.repeat(250)}`).join('\n');
+ const large=await f.api('POST','/bank-imports/preview',{...input,csv:largeCsv});assert.equal(large.status,200);assert.equal(large.body.items.length,400);
+ const preview=await f.api('POST','/bank-imports/preview',input);assert.equal(preview.status,200);assert.equal(preview.body.items[0].amount,12345);assert.equal(preview.body.items[0].description,'Оплата; услуг');
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,0);
+ const key=randomUUID(),first=await f.api('POST','/bank-imports',input,key);assert.equal(first.status,200);assert.equal(first.body.inserted,2);
+ assert.deepEqual((await f.api('POST','/bank-imports',input,key)).body,first.body);
+ assert.equal((await f.api('POST','/bank-imports',input)).body.duplicates,2);
+ assert.equal((await f.api('POST','/bank-imports',{...input,csv:csv.replace('123,45','123,46')})).status,409);
+ const imported=(await f.api('GET',`/bank-imports/${first.body.id}`)).body;
+ const incoming=imported.items.find(r=>r.amount>0),outgoing=imported.items.find(r=>r.amount<0);
+ const path=r=>`/bank-imports/${first.body.id}/rows/${r.id}`;
+ assert.equal((await f.api('POST',path(incoming)+'/post',{version:1})).status,409);
+ const reviewed=(await f.api('PUT',path(incoming),{version:1,classification:'INCOME',projectId:f.project.id})).body;
+ assert.equal(reviewed.version,2);
+ const posted=await f.api('POST',path(incoming)+'/post',{version:2});assert.equal(posted.status,200);
+ assert.equal((await f.api('POST',path(incoming)+'/post',{version:2})).body.journal_id,posted.body.journal_id);
+ assert.equal((await f.api('PUT',path(outgoing),{version:1,classification:'INCOME'})).status,400);
+ await f.api('PUT',path(outgoing),{version:1,classification:'EXPENSE',projectId:f.project.id});
+ assert.equal((await f.api('POST',path(outgoing)+'/post',{version:2})).status,200);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,10000);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.netProfit,10000);
+ const row=(await f.api('GET',`/bank-imports/${first.body.id}`)).body.items.find(r=>r.id===incoming.id);
+ const edited=await f.api('PUT',`/wallets/${f.wallet.id}/entries/${row.wallet_entry_id}`,{amount:12000,type:'INCOME',description:'Исправление',businessDate:'2026-10-20',projectId:f.project.id});
+ assert.equal(edited.status,200);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,9655);
+ assert.equal((await f.api('GET',`/bank-imports/${first.body.id}`)).body.items.find(r=>r.id===incoming.id).amount,12345,'original statement evidence is preserved');
+});
+
+test('bank matching settles the existing service invoice, not a second revenue posting',async t=>{
+ const f=await commercialFixture(t);
+ const invoice=(await f.api('POST','/commercial-documents',{...f.body,kind:'SALE_INVOICE'})).body;
+ await f.api('POST',`/commercial-documents/${invoice.id}/post`,{});
+ const imported=(await f.api('POST','/bank-imports',{walletId:f.wallet.id,csv:'date;reference;debit;credit;description\n2026-10-20;payment-1;0;100.00;Оплата счёта'})).body;
+ const row=(await f.api('GET',`/bank-imports/${imported.id}`)).body.items[0],path=`/bank-imports/${imported.id}/rows/${row.id}`;
+ await f.api('PUT',path,{version:1,classification:'DOCUMENT',documentId:invoice.id});
+ assert.equal((await f.api('POST',path+'/post',{version:2})).status,200);
+ assert.equal((await f.api('GET',`/commercial-documents/${invoice.id}`)).body.paid,10000);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.revenue,0);
+ const act=(await f.api('POST',`/commercial-documents/${invoice.id}/act`,{})).body;
+ await f.api('POST',`/commercial-documents/${act.id}/post`,{});
+ assert.equal((await f.api('GET','/reports/projects')).body.total.revenue,10000);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,10000);
+ assert.equal((await f.api('POST','/bank-imports',{walletId:f.wallet.id,csv:'date;reference;debit;credit;description\n2026-10-20;payment-1;0;100.00;Оплата счёта'})).body.inserted,0);
+});
+
+test('bank imports reject foreign wallets/projects and malformed money without partial financial writes',async t=>{
+ const f=await commercialFixture(t),stranger=await f.user('bank-stranger@example.test');
+ const foreign=(await f.call('POST','/v1/companies',{name:'OTHER',currency:'KZT'},stranger.token)).body;
+ const bank=(await f.call('POST',`/v1/companies/${foreign.id}/wallets`,{name:'OTHER BANK'},stranger.token,randomUUID())).body;
+ const input={walletId:f.wallet.id,csv:'date;reference;debit;credit;description\n2026-10-20;fee-1;1.01;0;Комиссия'};
+ assert.equal((await f.api('POST','/bank-imports',{...input,walletId:bank.id})).status,404);
+ assert.equal((await f.api('POST','/bank-imports',{...input,csv:input.csv.replace('1.01','1.001')})).status,400);
+ assert.equal((await f.api('POST','/bank-imports',{...input,csv:input.csv.replace('1.01;0','1.01;2')})).status,400);
+ const imported=(await f.api('POST','/bank-imports',input)).body;
+ const row=(await f.api('GET',`/bank-imports/${imported.id}`)).body.items[0],path=`/bank-imports/${imported.id}/rows/${row.id}`;
+ await f.api('PUT',path,{version:1,classification:'EXPENSE'});
+ assert.equal((await f.api('POST',path+'/post',{version:2})).status,409);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,0);
+ assert.equal((await f.api('GET',`/bank-imports/${imported.id}`)).body.items[0].journal_id,null);
+ const reader=await f.user('bank-reader@example.test');await f.api('PUT',`/members/${reader.id}`,{permissions:['bank.read']});
+ assert.equal((await f.call('POST',f.prefix+'/bank-imports',input,reader.token,randomUUID())).status,403);
+ assert.equal((await f.call('GET',f.prefix+`/bank-imports/${imported.id}`,undefined,stranger.token)).status,404);
+});
+
+test('dated project reports reconcile opening, turnover, closing and journal drilldown',async t=>{
+ const f=await commercialFixture(t);
+ const add=async(date,amount,projectId)=>f.api('POST','/accounting/journal',{businessDate:date,projectId,description:'SYNTHETIC REPORT',lines:[{account:'cash',debit:amount},{account:'revenue',credit:amount}]});
+ await add('2026-09-30',1000,f.project.id);const included=await add('2026-10-10',2500,f.project.id);await add('2026-10-10',400,null);await add('2026-11-01',900,f.project.id);
+ const query=`from=2026-10-01&to=2026-10-31&projectId=${f.project.id}`;
+ const trial=await f.api('GET','/accounting/trial-balance?'+query);assert.equal(trial.status,200);
+ const cash=trial.body.accounts.find(a=>a.account==='cash');assert.equal(cash.opening,1000);assert.equal(cash.debit,2500);assert.equal(cash.balance,3500);
+ assert.equal(trial.body.accounts.reduce((sum,a)=>sum+a.balance,0),0);
+ const pl=(await f.api('GET','/reports/profit-loss?'+query)).body;assert.equal(pl.revenue,2500);assert.equal(pl.netProfit,2500);
+ const journal=(await f.api('GET','/accounting/journal?'+query+'&account=revenue')).body.items;assert.equal(journal.length,1);assert.equal(journal[0].id,included.body.id);
+ assert.equal((await f.api('GET',`/accounting/journal/${included.body.id}`)).body.lines.length,2);
+ assert.equal((await f.api('GET','/accounting/trial-balance?from=2026-11-01&to=2026-10-01')).status,400);
+ await f.api('POST','/periods/2026-10/close',{reason:'SYNTHETIC CLOSE'});
+ assert.equal((await f.api('GET','/periods')).body.items[0].status,'CLOSED');
+ assert.equal((await f.api('PUT',`/accounting/journal/${included.body.id}`,{description:'Исправлено после закрытия',expectedRevision:0})).status,200);
+ assert.equal((await f.api('PUT',`/accounting/journal/${included.body.id}`,{description:'Устаревшая форма',expectedRevision:0})).status,409);
+});
+
+
+test('single-use recovery expires, revokes old sessions and survives concurrent reset attempts',async t=>{
+ const f=await fixture(t);const {issueRecoveryToken}=await import('../src/recovery.js');
+ const {hashToken}=await import('../src/security.js');
+ const first=await issueRecoveryToken(f.app.db,'owner@example.test');
+ const stored=await f.app.db.prepare('SELECT * FROM password_resets').get();assert.equal(stored.token_hash,hashToken(first.token));assert.notEqual(stored.token_hash,first.token);
+ const current=await issueRecoveryToken(f.app.db,'owner@example.test');
+ assert.equal((await f.call('POST','/v1/auth/reset-password',{token:first.token,password:'SYNTHETIC NEW PASSWORD'})).status,400);
+ const results=await Promise.all([f.call('POST','/v1/auth/reset-password',{token:current.token,password:'SYNTHETIC NEW PASSWORD'}),f.call('POST','/v1/auth/reset-password',{token:current.token,password:'SYNTHETIC NEW PASSWORD'})]);
+ assert.deepEqual(results.map(r=>r.status).sort(),[200,400]);
+ assert.equal((await f.call('GET','/v1/auth/me',undefined,f.owner.token)).status,401);
+ assert.equal((await f.call('POST','/v1/auth/login',{login:'owner@example.test',password:'correct-horse-battery'})).status,401);
+ assert.equal((await f.call('POST','/v1/auth/login',{login:'owner@example.test',password:'SYNTHETIC NEW PASSWORD'})).status,200);
+ const expired=await issueRecoveryToken(f.app.db,'owner@example.test');await f.app.db.prepare('UPDATE password_resets SET expires_at=0').run();
+ assert.equal((await f.call('POST','/v1/auth/reset-password',{token:expired.token,password:'SYNTHETIC EXPIRED PASSWORD'})).status,400);
 });

@@ -482,8 +482,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       );
     }),
   );
-  route('POST', '/:id/payments', (request) =>
-    command(request, 'documents.settle', 'document.payment', async (company) => {
+  const settleDocument = async (company, request) => {
       await access(request, 'wallets.transact');
       const doc = await get(company.id, request.params.id);
       if (!['ISSUED', 'POSTED'].includes(doc.status)) fail(409, 'document_not_posted');
@@ -545,8 +544,8 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         );
       await projectDocument(company, basis);
       return { id, document: await dto(await get(company.id, doc.id)) };
-    }),
-  );
+  };
+  route('POST', '/:id/payments', request => command(request, 'documents.settle', 'document.payment', company => settleDocument(company, request)));
   route('PUT', '/:id/payments/:paymentId', (request) =>
     command(request, 'documents.settle', 'document.payment.edit', async (company) => {
       await access(request, 'wallets.transact');
@@ -720,4 +719,5 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       .header('Content-Disposition', `inline; filename="document-${doc.id}.html"`);
     return html;
   });
+  return { settleDocument };
 }

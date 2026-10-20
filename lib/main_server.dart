@@ -9,6 +9,10 @@ import 'workspace/money_entries_dialog.dart';
 import 'workspace/commercial_workspace.dart';
 import 'workspace/catalog_workspace.dart';
 import 'workspace/company_creation.dart';
+import 'workspace/bank_workspace.dart';
+import 'workspace/ledger_workspace.dart';
+import 'workspace/inventory_workspace.dart';
+import 'workspace/recovery_dialog.dart';
 
 void main() => runApp(const AccountingWorkspace());
 const ink = Color(0xFF171B35),
@@ -43,6 +47,11 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'projects': 'Проекты',
     'sales': 'Продажи',
     'purchases': 'Покупки',
+    'bank': 'Деньги',
+    'inventory':'Склад',
+    'reports':'Отчёты',
+    'journal':'Бухгалтерские записи',
+    'periods':'Закрытие месяца',
     'counterparties': 'Контрагенты',
     'catalog': 'Товары и услуги'
   };
@@ -541,6 +550,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                                         onPressed: busy ? null : signIn,
                                         child:
                                             Text(busy ? 'Входим…' : 'Войти')),
+                                    TextButton(onPressed:()=>showDialog<void>(context:navigator.currentContext!,builder:(_)=>RecoveryDialog(api:api)),child:const Text('Забыли пароль?')),
                                     if (error != null)
                                       Padding(
                                           padding:
@@ -671,19 +681,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           513,
                           165,
                           TextButton(
-                              onPressed: () => showDialog<void>(
-                                  context: navigator.currentContext!,
-                                  builder: (context) => AlertDialog(
-                                          title: const Text(
-                                              'Восстановление доступа'),
-                                          content: const Text(
-                                              'Обратитесь к владельцу сервера для восстановления доступа к личному аккаунту.'),
-                                          actions: [
-                                            TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(context),
-                                                child: const Text('Понятно'))
-                                          ])),
+                              onPressed:()=>showDialog<void>(context:navigator.currentContext!,builder:(_)=>RecoveryDialog(api:api)),
                               child: const Text('Забыли пароль?',
                                   style: TextStyle(fontSize: 12)))),
                       at(
@@ -749,7 +747,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
         Text(company!.name,
             style: const TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 24),
-        ...sections.entries.map((entry) => ListTile(
+        Expanded(child:ListView(children:sections.entries.map((entry) => ListTile(
             contentPadding: EdgeInsets.zero,
             selected: section == entry.key,
             selectedColor: accent,
@@ -757,12 +755,16 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
               'projects' => Icons.folder_outlined,
               'sales' => Icons.receipt_long_outlined,
               'purchases' => Icons.shopping_bag_outlined,
+              'bank' => Icons.account_balance_wallet_outlined,
+              'reports' => Icons.bar_chart_outlined,
+              'inventory' => Icons.warehouse_outlined,
+              'journal' => Icons.menu_book_outlined,
+              'periods' => Icons.calendar_month_outlined,
               'counterparties' => Icons.people_outline,
               _ => Icons.inventory_2_outlined
             }),
             title: Text(entry.value, style: const TextStyle(fontSize: 13)),
-            onTap: busy ? null : () => setState(() => section = entry.key))),
-        const Spacer(),
+            onTap: busy ? null : () => setState(() => section = entry.key))).toList())),
         TextButton.icon(
             onPressed:
                 busy ? null : () => setState(() => creatingCompany = true),
@@ -882,6 +884,12 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                             from: period == null ? null : date(period!.start),
                             to: period == null ? null : date(period!.end),
                             onChanged: refresh)
+                        : section == 'bank'
+                            ? BankWorkspace(key:ValueKey(company!.id),api:api,companyId:company!.id,currency:company!.currency,projects:projects,onChanged:refresh,onEditMoney:(entry)=>addTransaction(entry))
+                        : section=='inventory'
+                            ? InventoryWorkspace(key:ValueKey(company!.id),api:api,companyId:company!.id,currency:company!.currency,projects:projects,onChanged:refresh)
+                        : ['reports','journal','periods'].contains(section)
+                            ? LedgerWorkspace(key:ValueKey('${company!.id}:$section:$selected:$period'),api:api,companyId:company!.id,currency:company!.currency,mode:section,projects:projects,projectId:selected,from:period==null?null:date(period!.start),to:period==null?null:date(period!.end),onChanged:refresh)
                         : CatalogWorkspace(
                             key: ValueKey('${company!.id}:$section'),
                             api: api,

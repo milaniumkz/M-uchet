@@ -63,6 +63,12 @@ export async function openDatabase({ connectionString = process.env.DATABASE_URL
       if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=10').get()) {
         await db.exec(await readFile(new URL('../migrations/009_company_creation_commands.sql', import.meta.url), 'utf8'));
       }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=11').get()) {
+        await db.exec(await readFile(new URL('../migrations/010_bank_imports.sql', import.meta.url), 'utf8'));
+      }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=12').get()) {
+        await db.exec(await readFile(new URL('../migrations/011_password_recovery.sql', import.meta.url), 'utf8'));
+      }
     });
     return db;
   } catch (error) { await pool.end(); throw error; }

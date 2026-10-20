@@ -9,11 +9,12 @@
   "scripts": {
     "start": "node --env-file-if-exists=../.env src/main.js",
     "dev": "node --env-file-if-exists=../.env --watch src/main.js",
-    "test": "APP_ENV=test node --env-file-if-exists=../.env --test test/api.test.js test/http.test.js",
+    "test": "APP_ENV=test node --env-file-if-exists=../.env --test test/api.test.js test/bank-csv.test.js test/http.test.js",
     "backup": "node --env-file-if-exists=../.env src/backup.js",
     "migrate": "node --env-file-if-exists=../.env src/migrate.js",
     "openapi": "node --env-file-if-exists=../.env src/openapi.js",
-    "provision-owner": "node --env-file-if-exists=../.env src/provision-owner.js"
+    "provision-owner": "node --env-file-if-exists=../.env src/provision-owner.js",
+    "issue-recovery": "node --env-file-if-exists=../.env src/issue-recovery.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
