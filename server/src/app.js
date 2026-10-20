@@ -13,6 +13,8 @@ import { hashPassword, verifyPassword, newToken, hashToken, fail, text, integer,
 import { postJournal, allocate, orderInput, projectReference, registerManualWalletEntries } from './accounting.js';
 import { kinds, permissions } from './resources.js';
 import { registerCommercialRoutes } from './commercial.js';
+import { registerEmployeeRoutes } from './employees.js';
+import { registerAssetRoutes } from './assets.js';
 import { resetPassword } from './recovery.js';
 import { registerBankRoutes } from './banking.js';
 import { registerBusinessRoutes } from './business.js';
@@ -402,6 +404,8 @@ export async function createApp(options = {}) {
     reply.type('application/octet-stream').header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
+  registerEmployeeRoutes(app,{db,auth,access,command,pageLimit,object});
+  registerAssetRoutes(app,{db,auth,access,command,pageLimit,object});
   const commercial=registerCommercialRoutes(app, { db, auth, access, command, pageLimit, object });
   registerBankRoutes(app, { db, auth, access, command, pageLimit, object, ...commercial });
   registerBusinessRoutes(app, { db, auth, access, command, pageLimit, object, audit });

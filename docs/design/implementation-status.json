@@ -165,8 +165,10 @@
       "id": "D-19",
       "title": "Сотрудники",
       "platform": "desktop",
-      "status": "not_implemented",
-      "visual_parity_verified": false
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/employees_workspace.dart",
+      "implemented_scope": "Частный кадровый реестр, поиск, отдельные права, условия работы, исправления и история; зарплатный расчёт ещё не реализован"
     },
     {
       "id": "D-20",
@@ -179,8 +181,10 @@
       "id": "D-21",
       "title": "Основные средства",
       "platform": "desktop",
-      "status": "not_implemented",
-      "visual_parity_verified": false
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/assets_workspace.dart",
+      "implemented_scope": "Карточка ОС, линейная owner-policy амортизация, исправление исходных данных с пересчётом, списание/восстановление, проводки и история. Пересмотр оценок, модернизация, продажа/НДС и полное соблюдение выбранного стандарта ещё требуют реализации"
     },
     {
       "id": "D-22",

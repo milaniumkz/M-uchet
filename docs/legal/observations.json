@@ -157,6 +157,71 @@
       "calculation_implemented": false,
       "official_schema_verified": false,
       "accountant_accepted": false
+    },
+    {
+      "id": "KZ-SO-2026-244-245",
+      "source_id": "K2300000224",
+      "article": "243,244(1),245(1)",
+      "effective_from": "2026-01-01",
+      "effective_to": "2026-12-31",
+      "summary": "СО5%: объект работника включает облагаемый доход минус ОПВ и предусмотренные исключения; отдельно действуют минимум1МЗП и максимум7МЗП. Не применять5% ко всем начислениям без проверки базы и категории.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-OPV-2026-249",
+      "source_id": "K2300000224",
+      "article": "248(3),249(1)",
+      "effective_from": "2026-01-01",
+      "effective_to": "2026-12-31",
+      "summary": "ОПВ10%; для работников проверен предел50МЗП. Освобождения и состав дохода определяются отдельно; минимальную базу ИП нельзя переносить на каждого работника.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-OPVR-2026-251",
+      "source_id": "K2300000224",
+      "article": "248(6),251(1)-(2)",
+      "effective_from": "2026-01-01",
+      "effective_to": "2026-12-31",
+      "summary": "ОПВР3,5% только для2026; база от1до50МЗП при применимости. Исключение по рождению — до01.01.1975, а также пенсионеры и другие перечисленные категории; не определять применимость одной ставкой.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-OSMS-2026-27-28",
+      "source_id": "Z1500000405",
+      "article": "27(1),(2-2),28(1),(5-2)",
+      "effective_from": "2026-01-01",
+      "effective_to": "2026-12-31",
+      "summary": "ОСМС работодателя3% с пределом40МЗП; взносы работника2% с пределом20МЗП. Категории освобождений и исключаемые доходы ещё требуют полной реализации.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-NSFO-ASSET-24-28",
+      "source_id": "V1300008328",
+      "article": "24-28",
+      "effective_from": null,
+      "effective_to": null,
+      "summary": "НСФО: прямолинейное начисление с первого числа месяца после доступности актива; пересмотр срока — корректировка текущих/будущих периодов. Реализованный owner-policy редактор исправлений не объявляется полным модулем НСФО, модернизации или пересмотра оценок.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
     }
   ]
 }

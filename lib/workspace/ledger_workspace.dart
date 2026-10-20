@@ -7,8 +7,13 @@ import '../backend/rest/retriable_command.dart';
 import 'commercial_repository.dart';
 import 'commercial_detail.dart';
 import 'input_dialogs.dart';
+import 'assets_workspace.dart';
 
 const ledgerLabels = {
+  'fixed_assets':'Основные средства',
+  'accumulated_depreciation':'Накопленная амортизация',
+  'depreciation':'Амортизационные расходы',
+  'asset_disposal_loss':'Списание основных средств',
   'cash': 'Денежные средства',
   'capital': 'Капитал',
   'revenue': 'Доходы',
@@ -162,7 +167,9 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
       if (!mounted) {
         return;
       }
-      if (details['sourceDocumentId'] != null) {
+      if(details['sourceAssetId']!=null){
+        await showAssetDetails(context,api:widget.api,companyId:widget.companyId,assetId:details['sourceAssetId'] as String,currency:widget.currency,projects:widget.projects,onChanged:widget.onChanged);
+      }else if (details['sourceDocumentId'] != null) {
         final doc = await CommercialRepository(
           widget.api,
           widget.companyId,

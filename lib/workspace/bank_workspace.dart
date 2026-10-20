@@ -38,6 +38,7 @@ class _BankWorkspaceState extends State<BankWorkspace> {
   List<Map<String, dynamic>> wallets = [], imports = [], rows = [];
   String? selectedImport, error;
   bool busy = false;
+  bool opening = false;
   final pending = <String, RetriableCommand>{};
   List<String> path([String? id]) => [
     'v1',
@@ -147,10 +148,10 @@ class _BankWorkspaceState extends State<BankWorkspace> {
   }
 
   Future<void> review(Map<String,dynamic> row) async {
-    if(busy){return;}
-    setState(()=>busy=true);
+    if(busy||opening){return;}
+    opening=true;
     try{await reviewSource(row);}on BackendException catch(e){if(mounted){setState(()=>error=e.message);}}
-    finally{if(mounted){setState(()=>busy=false);}}
+    finally{opening=false;}
   }
   Future<void> reviewSource(Map<String, dynamic> row) async {
     if (row['journal_id'] != null) {

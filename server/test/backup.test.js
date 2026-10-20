@@ -48,6 +48,11 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const bankRows=(await request('GET',prefix+`/bank-imports/${statement.id}`,undefined,session.token)).items;
  await request('PUT',prefix+`/bank-imports/${statement.id}/rows/${bankRows[0].id}`,{version:1,classification:'CAPITAL'},session.token,key());
  await request('POST',prefix+`/bank-imports/${statement.id}/rows/${bankRows[0].id}/post`,{version:2},session.token,key());
+ const supplier=await request('POST',prefix+'/resources/suppliers',{data:{name:'SYNTHETIC RESTORE SUPPLIER'}},session.token,key());
+ const employee=await request('POST',prefix+'/employees',{name:'SYNTHETIC RESTORE EMPLOYEE',identifier:'000000000001',jobTitle:'SYNTHETIC JOB',hireDate:'2026-01-01',birthDate:'1990-01-01',grossBase:1234567,status:'ACTIVE',resident:true,citizenship:'KZ',standardDeductionDeclaration:false},session.token,key());
+ const asset=await request('POST',prefix+'/assets',{name:'SYNTHETIC RESTORE ASSET',inventoryNumber:'RESTORE-ASSET-1',supplierId:supplier.id,cost:4321,residual:321,lifeMonths:2,acquisitionDate:'2026-01-15',depreciationStart:'2026-02',method:'LINEAR_MONTHLY',policyAcknowledged:true},session.token,key());
+ await request('POST',prefix+`/assets/${asset.id}/activate`,{},session.token,key());
+ await request('POST',prefix+`/assets/${asset.id}/depreciation`,{throughMonth:'2026-03'},session.token,key());
  await app.close();app=undefined;
  const dump=await open(join(directory,'backup.dump'),'wx',0o600);
  try{await docker(['pg_dump','-U','muchet','-d','muchet',`--schema=${schema}`,'--format=custom','--no-owner','--no-acl'],'ignore',dump.fd);}finally{await dump.close();}
@@ -66,5 +71,7 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const links=(await restored.inject({url:prefix+`/commercial-documents/${service.id}/files`,headers})).json().items;assert.equal(links[0].id,uploaded.id);
  const bankCopy=(await restored.inject({url:prefix+`/bank-imports/${statement.id}`,headers})).json();assert.equal(bankCopy.items[0].external_id,'restore-bank-1');assert.ok(bankCopy.items[0].journal_id);
  const wallets=(await restored.inject({url:prefix+'/wallets',headers})).json().items;assert.equal(wallets.find(w=>w.id===bankWallet.id).balance,1234);
+ const assetCopy=(await restored.inject({url:prefix+`/assets/${asset.id}`,headers})).json();assert.equal(assetCopy.depreciation,4000);assert.equal(assetCopy.carryingAmount,321);
+ const employeeCopy=(await restored.inject({url:prefix+`/employees/${employee.id}`,headers})).json();assert.equal(employeeCopy.gross_base,1234567);
  const file=await restored.inject({url:prefix+'/files/'+uploaded.id,headers});assert.equal(file.body,'SYNTHETIC RESTORE CONTENT');
 });

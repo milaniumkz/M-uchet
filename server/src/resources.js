@@ -2,7 +2,7 @@
 export const resourceGroups = {
   catalog: ['nomenklatura','nomenclature_categories','warehouses','shops','clients','suppliers',
     'services','service_categories','service_cost_models','statRashod','country','valuta','nalogi','taxes','forma','oced','otrasli'],
-  organization: ['company_profile','company_branches','company_departments','employees','staff_schedule'],
+  organization: ['company_profile','company_branches','company_departments','staff_schedule'],
   planning: ['budget_projects','expense_plans','fin_models','marketing_campaigns','funding_requests','funding_request_categories'],
   devices: ['devices'],
   support: ['support_tickets'],
@@ -15,5 +15,5 @@ export const permissions = [
   'wallets.read','wallets.write','wallets.transact','debts.read','debts.write','debts.settle',
   'shifts.read','shifts.write','devices.command','reports.read',
   'periods.close','periods.reopen','documents.read','documents.write','documents.post','documents.settle','documents.export',
-  'bank.read','bank.import','bank.review','bank.post','accounting.edit','orders.edit','projects.read','projects.write',
+  'employees.read','employees.write','assets.read','assets.write','assets.post','bank.read','bank.import','bank.review','bank.post','accounting.edit','orders.edit','projects.read','projects.write',
 ];

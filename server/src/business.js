@@ -55,6 +55,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     return accountReference(request.query.asOf??businessDate(undefined,company.timezone));
   });
 
+  const assetSource=async(companyId,id)=>db.prepare('SELECT asset_id FROM asset_postings WHERE company_id=? AND journal_id=? LIMIT 1').get(companyId,id);
   const commercialSource=async(companyId,id)=>db.prepare(`SELECT document_id FROM commercial_postings WHERE company_id=? AND journal_id=? UNION SELECT document_id FROM commercial_payments WHERE company_id=? AND journal_id=? UNION SELECT p.document_id FROM commercial_payments p JOIN wallet_entries e ON e.reference_id=p.id WHERE p.company_id=? AND e.journal_id=? LIMIT 1`).get(companyId,id,companyId,id,companyId,id);
   route('GET', '/wallets', async request => {
     (await access(request, 'wallets.read'));
@@ -274,7 +275,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     for (const row of rows) for (const line of JSON.parse(row.lines)) {
       if (line.account === 'revenue') revenue += line.credit - line.debit;
       if (line.account === 'cogs') cogs += line.debit - line.credit;
-      if (['expenses','inventory_loss'].includes(line.account)) expenses += line.debit - line.credit;
+      if (['expenses','inventory_loss','depreciation','asset_disposal_loss'].includes(line.account)) expenses += line.debit - line.credit;
     }
     for (const amount of [revenue,cogs,expenses,revenue-cogs-expenses]) if (!Number.isSafeInteger(amount)) fail(422, 'report_amount_overflow');
     return { scope: ledgerScope, from, to, revenue, cogs, grossProfit: revenue-cogs, expenses, netProfit: revenue-cogs-expenses };
@@ -287,9 +288,9 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const company=await access(request,'accounting.read');
     const row=await db.prepare('SELECT * FROM journal WHERE company_id=? AND id=?').get(company.id,request.params.id);
     if(!row)fail(404,'journal_not_found');
-    const source=await commercialSource(company.id,row.id);
+    const source=await commercialSource(company.id,row.id),asset=await assetSource(company.id,row.id);
     const revision=(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(row.id)).n;
-    return {...row,revision,lines:JSON.parse(row.lines),sourceDocumentId:source?.document_id??null};
+    return {...row,revision,lines:JSON.parse(row.lines),sourceDocumentId:source?.document_id??null,sourceAssetId:asset?.asset_id??null};
   });
   for (const [operation,status,permission] of [['close','CLOSED','periods.close'],['reopen','OPEN','periods.reopen']]) {
     route('POST', `/periods/:month/${operation}`, async request => command(request, permission, `period.${operation}`, async company => {
@@ -323,7 +324,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if(body.expectedRevision!==undefined&&body.expectedRevision!==(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(old.id)).n)fail(409,'version_conflict');
     await db.prepare("SELECT set_config('app.edit_reason',?,true)").get(reason);
     const replacement={id:old.id,projectId:await projectReference(db,company.id,Object.hasOwn(body,'projectId')?body.projectId:old.project_id),scope:scope(body.scope??old.scope),description:text(body.description??old.description,'description',500),businessDate:businessDate(body.businessDate??old.business_date,company.timezone),lines:normalizeLines({lines:body.lines??JSON.parse(old.lines)})};
-    if(await commercialSource(company.id,old.id)&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
+    if((await commercialSource(company.id,old.id)||await assetSource(company.id,old.id))&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
     if([...JSON.parse(old.lines),...replacement.lines].some(line=>line.account.startsWith('wallet:')))await access(request,'wallets.transact');
     await db.prepare('UPDATE journal SET scope=?,description=?,lines=?,business_date=?,project_id=? WHERE id=?').run(replacement.scope,replacement.description,JSON.stringify(replacement.lines),replacement.businessDate,replacement.projectId,old.id);
     await db.prepare('DELETE FROM journal_lines WHERE entry_id=?').run(old.id);

@@ -13,6 +13,8 @@ import 'workspace/bank_workspace.dart';
 import 'workspace/ledger_workspace.dart';
 import 'workspace/inventory_workspace.dart';
 import 'workspace/recovery_dialog.dart';
+import 'workspace/assets_workspace.dart';
+import 'workspace/employees_workspace.dart';
 
 void main() => runApp(const AccountingWorkspace());
 const ink = Color(0xFF171B35),
@@ -49,6 +51,8 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'purchases': 'Покупки',
     'bank': 'Деньги',
     'inventory':'Склад',
+    'assets':'Активы',
+    'employees':'Сотрудники',
     'reports':'Отчёты',
     'journal':'Бухгалтерские записи',
     'periods':'Закрытие месяца',
@@ -437,7 +441,10 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
           fontFamily: 'DejaVuSans',
-          colorScheme: ColorScheme.fromSeed(seedColor: accent),
+          colorScheme: ColorScheme.fromSeed(seedColor: accent).copyWith(primary:accent,onPrimary:Colors.white,surface:Colors.white,onSurface:ink),
+          cardTheme: CardThemeData(color:Colors.white,surfaceTintColor:Colors.transparent,elevation:0,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14),side:const BorderSide(color:Color(0xFFE5E9F2)))),
+          dialogTheme: DialogThemeData(backgroundColor:Colors.white,surfaceTintColor:Colors.transparent,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14))),
+          dataTableTheme: const DataTableThemeData(headingRowColor:WidgetStatePropertyAll(Color(0xFFF5F7FB)),dividerThickness:1),
           scaffoldBackgroundColor: const Color(0xFFF5F7FB),
           textTheme: const TextTheme(
               bodyMedium:
@@ -748,6 +755,10 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
             style: const TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 24),
         Expanded(child:ListView(children:sections.entries.map((entry) => ListTile(
+            dense:true,
+            minTileHeight:44,
+            selectedTileColor:const Color(0xFFEFEEFE),
+            shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(12)),
             contentPadding: EdgeInsets.zero,
             selected: section == entry.key,
             selectedColor: accent,
@@ -758,6 +769,8 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
               'bank' => Icons.account_balance_wallet_outlined,
               'reports' => Icons.bar_chart_outlined,
               'inventory' => Icons.warehouse_outlined,
+              'assets' => Icons.computer_outlined,
+              'employees' => Icons.badge_outlined,
               'journal' => Icons.menu_book_outlined,
               'periods' => Icons.calendar_month_outlined,
               'counterparties' => Icons.people_outline,
@@ -886,6 +899,10 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                             onChanged: refresh)
                         : section == 'bank'
                             ? BankWorkspace(key:ValueKey(company!.id),api:api,companyId:company!.id,currency:company!.currency,projects:projects,onChanged:refresh,onEditMoney:(entry)=>addTransaction(entry))
+                        : section=='employees'
+                            ? EmployeesWorkspace(key:ValueKey('${company!.id}:$selected'),api:api,companyId:company!.id,currency:company!.currency,projects:projects,projectId:selected)
+                        : section=='assets'
+                            ? AssetsWorkspace(key:ValueKey(company!.id),api:api,companyId:company!.id,currency:company!.currency,projects:projects,onChanged:refresh)
                         : section=='inventory'
                             ? InventoryWorkspace(key:ValueKey(company!.id),api:api,companyId:company!.id,currency:company!.currency,projects:projects,onChanged:refresh)
                         : ['reports','journal','periods'].contains(section)

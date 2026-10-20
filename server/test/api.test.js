@@ -218,7 +218,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 12);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 14);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -739,4 +739,54 @@ test('single-use recovery expires, revokes old sessions and survives concurrent 
  assert.equal((await f.call('POST','/v1/auth/login',{login:'owner@example.test',password:'SYNTHETIC NEW PASSWORD'})).status,200);
  const expired=await issueRecoveryToken(f.app.db,'owner@example.test');await f.app.db.prepare('UPDATE password_resets SET expires_at=0').run();
  assert.equal((await f.call('POST','/v1/auth/reset-password',{token:expired.token,password:'SYNTHETIC EXPIRED PASSWORD'})).status,400);
+});
+
+
+test('fixed asset policy uses exact cumulative rounding and edits recalculate project depreciation after close',async t=>{
+ const f=await commercialFixture(t),input={name:'SYNTHETIC LAPTOP',inventoryNumber:'SYNTH-001',supplierId:f.supplier.id,scope:'ACCOUNTING',projectId:f.project.id,cost:10001,residual:1000,lifeMonths:3,acquisitionDate:'2026-01-15',depreciationStart:'2026-02',method:'LINEAR_MONTHLY',policyAcknowledged:true};
+ const asset=(await f.api('POST','/assets',input)).body;assert.equal(asset.status,'DRAFT');assert.equal((await f.api('GET','/accounting/journal')).body.items.length,0);
+ assert.equal((await f.api('POST',`/assets/${asset.id}/activate`,{})).status,200);
+ const accrued=(await f.api('POST',`/assets/${asset.id}/depreciation`,{throughMonth:'2026-04'})).body;
+ assert.deepEqual(accrued.schedule.map(m=>m.amount),[3000,3001,3000]);assert.equal(accrued.depreciation,9001);assert.equal(accrued.carryingAmount,1000);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.expenses,9001);
+ await f.api('POST','/periods/2026-02/close',{reason:'SYNTHETIC CLOSE'});
+ const other=(await f.api('POST','/projects',{name:'SYNTHETIC SECOND PROJECT'})).body;
+ const edited=await f.api('PUT',`/assets/${asset.id}`,{...input,version:accrued.version,cost:16000,residual:1000,projectId:other.id});assert.equal(edited.status,200);assert.equal(edited.body.depreciation,15000);
+ const report=(await f.api('GET','/reports/projects')).body;assert.equal(report.total.expenses,15000);assert.equal(report.items.find(p=>p.projectId===f.project.id).expenses,0);assert.equal(report.items.find(p=>p.projectId===other.id).expenses,15000);
+ const trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;assert.equal(trial.find(a=>a.account==='fixed_assets').balance,16000);assert.equal(trial.find(a=>a.account==='accumulated_depreciation').balance,-15000);
+ const written=await f.api('POST',`/assets/${asset.id}/writeoff`,{businessDate:'2026-03-15',reason:'SYNTHETIC WRITE OFF'});assert.equal(written.status,200);assert.equal(written.body.depreciation,5000);assert.equal(written.body.carryingAmount,0);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.expenses,16000);
+ assert.equal((await f.api('GET',`/assets/${asset.id}/history`)).body.items.length,4);
+ const movements=(await f.api('GET',`/assets/${asset.id}/movements`)).body.items;
+ const active=movements.find(m=>m.active);assert.equal((await f.api('GET',`/accounting/journal/${active.journal_id}`)).body.sourceAssetId,asset.id);
+ assert.equal((await f.api('PUT',`/accounting/journal/${active.journal_id}`,{businessDate:'2026-09-01'})).status,409);
+ assert.equal((await f.api('POST',`/assets/${asset.id}/activate`,{})).status,200);
+ assert.equal((await f.api('GET','/reports/projects')).body.total.expenses,15000);
+});
+
+test('asset register rejects missing policy, foreign suppliers and duplicate inventory numbers',async t=>{
+ const f=await commercialFixture(t),body={name:'SYNTHETIC ASSET',inventoryNumber:'SYNTH-A',supplierId:f.supplier.id,cost:1000,residual:0,lifeMonths:12,acquisitionDate:'2026-10-20',depreciationStart:'2026-11',method:'LINEAR_MONTHLY',policyAcknowledged:true};
+ assert.equal((await f.api('POST','/assets',{...body,policyAcknowledged:false})).status,422);
+ assert.equal((await f.api('POST','/assets',{...body,supplierId:randomUUID()})).status,404);
+ assert.equal((await f.api('POST','/assets',{...body,residual:1001})).status,400);
+ const created=await f.api('POST','/assets',body);assert.equal(created.status,200);
+ assert.equal((await f.api('POST','/assets',body)).status,409);
+ const key=randomUUID();assert.equal((await f.api('POST',`/assets/${created.body.id}/activate`,{},key)).status,200);assert.equal((await f.api('POST',`/assets/${created.body.id}/activate`,{},key)).status,200);
+ assert.equal((await f.api('GET','/accounting/journal')).body.items.length,1);
+});
+
+
+test('employee profiles have private permissions, validated dates, exact pay and versioned history',async t=>{
+ const f=await commercialFixture(t),body={name:'SYNTHETIC EMPLOYEE',identifier:'000000000001',jobTitle:'SYNTHETIC DEVELOPER',hireDate:'2026-01-01',birthDate:'1990-01-01',grossBase:34567890,projectId:f.project.id,status:'ACTIVE',resident:true,citizenship:'KZ',standardDeductionDeclaration:true,notes:'SYNTHETIC TEST ONLY'};
+ const idempotency=randomUUID(),created=await f.api('POST','/employees',body,idempotency);assert.equal(created.status,200);assert.equal(created.body.gross_base,34567890);
+ assert.equal((await f.api('POST','/employees',body,idempotency)).body.id,created.body.id);
+ assert.equal((await f.api('POST','/employees',body)).status,409);
+ assert.equal((await f.api('GET','/employees?q=DEVELOPER')).body.items.length,1);
+ const edited=await f.api('PUT',`/employees/${created.body.id}`,{...body,version:1,grossBase:35000000,status:'INACTIVE',terminationDate:'2026-10-20'});assert.equal(edited.status,200);
+ assert.equal((await f.api('PUT',`/employees/${created.body.id}`,{...body,version:1})).status,409);
+ const history=(await f.api('GET',`/employees/${created.body.id}/history`)).body.items;assert.equal(history.length,1);assert.equal(history[0].snapshot.gross_base,34567890);
+ const catalogReader=await f.user('catalog-only@example.test');await f.api('PUT',`/members/${catalogReader.id}`,{permissions:['organization.read','catalog.read']});
+ assert.equal((await f.call('GET',f.prefix+'/employees',undefined,catalogReader.token)).status,403);
+ assert.equal((await f.api('POST','/resources/employees',{data:{name:'BYPASS'}})).status,404);
+ assert.equal((await f.api('POST','/employees',{...body,identifier:'000000000002',birthDate:'2027-01-01'})).status,400);
 });
