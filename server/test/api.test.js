@@ -218,7 +218,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 6);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 8);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -401,4 +401,57 @@ test('same-origin web assets do not bypass API auth or expose dotfiles',async t=
  assert.equal((await f.app.inject('/v1/companies')).statusCode,401);
  assert.equal((await f.app.inject('/.env')).statusCode,403);
  assert.ok([403,404].includes((await f.app.inject('/%2e%2e/.env')).statusCode));
+});
+
+
+test('legal and tax settings belong to company, not to an individual project',async t=>{
+ const f=await fixture(t);
+ assert.equal((await f.api('GET','/settings')).body.version,0);
+ const settings={version:0,legalName:'Синтетическая фирма',identifier:null,legalForm:'TOO',taxRegime:'GENERAL',vatRegistered:true};
+ assert.equal((await f.api('PUT','/settings',{...settings,identifier:'invalid'})).status,400);
+ const saved=await f.api('PUT','/settings',settings);assert.equal(saved.status,200);assert.equal(saved.body.version,1);
+ await f.api('POST','/projects',{name:'Проект без собственного налогового режима'});
+ assert.equal((await f.api('GET','/settings')).body.tax_regime,'GENERAL');
+ assert.equal((await f.api('PUT','/settings',settings)).status,409);
+ const outsider=await f.user('settings-outsider@example.test');
+ assert.equal((await f.call('GET',f.prefix+'/settings',undefined,outsider.token)).status,404);
+});
+
+
+test('editing a money transaction updates wallet and project profit atomically',async t=>{
+ const f=await fixture(t),project=(await f.api('POST','/projects',{name:'Новый проект'})).body;
+ const wallet=(await f.api('POST','/wallets',{name:'Счёт'})).body;
+ const income=(await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'INCOME',amount:1000,description:'Первый доход'})).body;
+ await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'EXPENSE',amount:100,description:'Расход'});
+ const path=`/wallets/${wallet.id}/entries/${income.entryId}`;
+ assert.equal((await f.api('PUT',path,{amount:50})).status,409);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,900);
+ const edit=await f.api('PUT',path,{amount:500,projectId:project.id,description:'Исправленный доход'});
+ assert.equal(edit.status,200);assert.equal(edit.body.balance,400);
+ const report=(await f.api('GET','/reports/projects')).body;
+ assert.equal(report.total.netProfit,400);assert.equal(report.items.find(p=>p.projectId===project.id).netProfit,500);
+ assert.equal(report.items.find(p=>p.projectId===null).netProfit,-100);
+ const entry=(await f.api('GET',`/wallets/${wallet.id}/entries`)).body.items.find(e=>e.id===income.entryId);
+ assert.equal(entry.amount,500);
+ assert.equal((await f.api('GET',`/accounting/journal/${entry.journal_id}/history`)).body.items.length,1);
+});
+
+
+test('manual wallet journal edits keep the spendable balance consistent with the ledger',async t=>{
+ const f=await fixture(t),wallet=(await f.api('POST','/wallets',{name:'Счёт'})).body;
+ const entry=(await f.api('POST','/accounting/journal',{description:'Вклад',lines:[{account:`wallet:${wallet.id}`,debit:900},{account:'capital',credit:900}]})).body;
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,900);
+ const revised=await f.api('PUT',`/accounting/journal/${entry.id}`,{lines:[{account:`wallet:${wallet.id}`,debit:600},{account:'capital',credit:600}]});
+ assert.equal(revised.status,200);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,600);
+ const denied=await f.api('PUT',`/accounting/journal/${entry.id}`,{lines:[{account:`wallet:${wallet.id}`,credit:1},{account:'capital',debit:1}]});
+ assert.equal(denied.status,409);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,600);
+});
+
+
+test('manual journal permissions cannot bypass wallet transaction permissions',async t=>{
+ const f=await fixture(t),wallet=(await f.api('POST','/wallets',{name:'Счёт'})).body;
+ const member=await f.user('ledger-only@example.test');
+ assert.equal((await f.api('PUT',`/members/${member.id}`,{permissions:['accounting.post']})).status,200);
+ const posted=await f.call('POST',f.prefix+'/accounting/journal',{description:'No wallet permission',lines:[{account:`wallet:${wallet.id}`,debit:1},{account:'capital',credit:1}]},member.token,randomUUID());
+ assert.equal(posted.status,403);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,0);
 });

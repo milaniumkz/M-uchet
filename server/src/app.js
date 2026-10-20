@@ -318,6 +318,7 @@ export async function createApp(options = {}) {
   })));
   app.post('/v1/companies/:companyId/accounting/journal', { preHandler: auth }, async request => command(request, 'accounting.post', 'journal.post', async company => {
     const body = object(request.body);
+    if(Array.isArray(body.lines)&&body.lines.some(line=>typeof line?.account==='string'&&line.account.startsWith('wallet:')))await access(request,'wallets.transact');
     return postJournal(db, company, { ...body, description: `Manual: ${text(body.description, 'description', 490)}` });
   }));
   app.get('/v1/companies/:companyId/accounting/journal', { preHandler: auth }, async request => {

@@ -69,6 +69,46 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.text('1000.25 KZT'), findsWidgets);
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Операции'));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    });
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.byTooltip('Редактировать операцию'));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    });
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '800,10');
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Сохранить'));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('800.10 KZT'), findsWidgets);
+    await tester.tap(find.byTooltip('Закрыть'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Фирма'));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Параметры фирмы'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).at(0), 'Своя фирма');
+    await tester.tap(find.byType(DropdownButtonFormField<String>).at(0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ТОО').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Общеустановленный').last);
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Сохранить'));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Параметры фирмы'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

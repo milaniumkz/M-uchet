@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/foundation.dart';
 import 'backend/rest/api_client.dart';
 import 'backend/rest/repositories.dart';
 import 'workspace/project_repository.dart';
+import 'workspace/company_settings_dialog.dart';
+import 'workspace/money_entries_dialog.dart';
 
 void main() => runApp(const AccountingWorkspace());
 const ink = Color(0xFF171B35),
@@ -85,7 +88,23 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
         companies = await identity.companies();
         if (companies.isEmpty) throw const BackendException('no_company');
         company = companies.first;
+        selected = null;
         await refresh();
+      });
+  Future<void> companySettings() async {
+    await showDialog<bool>(
+        context: navigator.currentContext!,
+        builder: (context) =>
+            CompanySettingsDialog(api: api, companyId: company!.id));
+  }
+
+  Future<void> logout() => perform(() async {
+        await IdentityRepository(api).logout();
+        company = null;
+        report = null;
+        selected = null;
+        projects = [];
+        companies = [];
       });
   Future<void> createProject() async {
     var name = '';
@@ -182,7 +201,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     }
   }
 
-  Future<void> addTransaction() async {
+  Future<void> addTransaction([Map<String, dynamic>? entry]) async {
     List<Map<String, dynamic>> wallets = [];
     await perform(() async {
       final response = jsonObject(await api
@@ -220,11 +239,16 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
       if (error == null) await addTransaction();
       return;
     }
-    var walletId = wallets.first['id'] as String,
-        type = 'INCOME',
-        amount = '',
-        description = '';
-    var projectId = selected == 'unassigned' ? null : selected;
+    var walletId =
+            entry?['wallet_id'] as String? ?? wallets.first['id'] as String,
+        type = entry?['kind'] as String? ?? 'INCOME',
+        amount = entry == null
+            ? ''
+            : ((entry['amount'] as num).abs() / 100).toStringAsFixed(2),
+        description = entry?['description'] as String? ?? '';
+    var projectId = entry == null
+        ? (selected == 'unassigned' ? null : selected)
+        : entry['project_id'] as String?;
     String? validation;
     final result = await showDialog<Map<String, dynamic>>(
         context: navigator.currentContext!,
@@ -279,7 +303,8 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                                       onChanged: (v) => projectId =
                                           v == 'unassigned' ? null : v),
                                   const SizedBox(height: 16),
-                                  TextField(
+                                  TextFormField(
+                                      initialValue: amount,
                                       keyboardType:
                                           const TextInputType.numberWithOptions(
                                               decimal: true),
@@ -288,7 +313,8 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                                           labelText:
                                               'Сумма, ${company!.currency}')),
                                   const SizedBox(height: 16),
-                                  TextField(
+                                  TextFormField(
+                                      initialValue: description,
                                       onChanged: (v) => description = v,
                                       decoration: const InputDecoration(
                                           labelText: 'Основание операции')),
@@ -334,9 +360,20 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     if (result != null) {
       await perform(() async {
         final wallet = result.remove('walletId') as String;
-        await api.request('POST',
-            ['v1', 'companies', company!.id, 'wallets', wallet, 'transactions'],
-            body: result, operation: OperationKey());
+        await api.request(
+            entry == null ? 'POST' : 'PUT',
+            [
+              'v1',
+              'companies',
+              company!.id,
+              'wallets',
+              wallet,
+              if (entry == null)
+                'transactions'
+              else ...['entries', entry['id'] as String]
+            ],
+            body: result,
+            operation: OperationKey());
         await refresh();
       });
     }
@@ -344,15 +381,26 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+      title: 'М-учёт',
+      locale: const Locale('ru', 'RU'),
+      supportedLocales: const [Locale('ru', 'RU'), Locale('kk', 'KZ')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       navigatorKey: navigator,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
           fontFamily: 'DejaVuSans',
           colorScheme: ColorScheme.fromSeed(seedColor: accent),
           scaffoldBackgroundColor: const Color(0xFFF5F7FB),
-          textTheme:
-              const TextTheme(bodyMedium: TextStyle(color: ink, fontSize: 14, letterSpacing: 0)),
+          textTheme: const TextTheme(
+              bodyMedium:
+                  TextStyle(color: ink, fontSize: 14, letterSpacing: 0)),
           inputDecorationTheme: const InputDecorationTheme(
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(10)),
+                  borderSide: BorderSide(color: Color(0xFFE5E9F2))),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(10)),
+                  borderSide: BorderSide(color: accent)),
               filled: true,
               fillColor: Colors.white,
               border: OutlineInputBorder(
@@ -368,12 +416,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
       home: Builder(
           builder: (context) => Scaffold(
               body: company == null ? authView() : workspace(),
-              floatingActionButton: company == null
-                  ? null
-                  : FloatingActionButton(
-                      onPressed: busy ? null : createProject,
-                      tooltip: 'Создать проект',
-                      child: const Icon(Icons.add)))));
+              floatingActionButton: company == null ? null : FloatingActionButton(onPressed: busy ? null : createProject, tooltip: 'Создать проект', child: const Icon(Icons.add)))));
   Widget authView() => LayoutBuilder(
       builder: (context, constraints) => constraints.maxWidth >= 1100 &&
               constraints.maxHeight >= 700
@@ -723,6 +766,28 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                         onPressed: busy ? null : addTransaction,
                         icon: const Icon(Icons.add),
                         label: const Text('Доход / расход')),
+                    TextButton.icon(
+                        onPressed: busy
+                            ? null
+                            : () => showDialog<void>(
+                                context: navigator.currentContext!,
+                                builder: (context) => MoneyEntriesDialog(
+                                    api: api,
+                                    companyId: company!.id,
+                                    currency: company!.currency,
+                                    projectId: selected,
+                                    onEdit: (entry) => addTransaction(entry))),
+                        icon: const Icon(Icons.receipt_long_outlined),
+                        label: const Text('Операции')),
+                    TextButton.icon(
+                        onPressed: busy ? null : companySettings,
+                        icon: const Icon(Icons.business_outlined),
+                        label: const Text('Фирма')),
+                    if (size.maxWidth < 1000)
+                      IconButton(
+                          onPressed: busy ? null : logout,
+                          tooltip: 'Выйти',
+                          icon: const Icon(Icons.logout)),
                     TextButton.icon(
                         onPressed: busy ? null : choosePeriod,
                         icon: const Icon(Icons.date_range),

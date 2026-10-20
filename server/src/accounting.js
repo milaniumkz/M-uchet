@@ -5,6 +5,7 @@ export function normalizeLines(input) {
   if (!Array.isArray(input.lines) || input.lines.length < 2 || input.lines.length > 100) fail(400, 'invalid_lines');
   let debits = 0, credits = 0;
   const lines = input.lines.map(line => {
+    if(!line||typeof line!=='object'||Array.isArray(line))fail(400,'invalid_line');
     const account = text(line.account, 'account', 64);
     const debit = integer(line.debit ?? 0, 'debit');
     const credit = integer(line.credit ?? 0, 'credit');
@@ -23,6 +24,18 @@ export async function projectReference(db, companyId, id) {
   return row.id;
 }
 
+// Wallet balances are projections of the ledger, including manual edits.
+export async function syncWalletBalances(db,companyId,lines) {
+  const ids=[...new Set(lines.filter(line=>line.account.startsWith('wallet:')).map(line=>line.account.slice(7)))];
+  for(const id of ids){
+    const wallet=await db.prepare('SELECT id FROM wallets WHERE company_id=? AND id=?').get(companyId,id);
+    if(!wallet)fail(404,'wallet_not_found');
+    const {balance}=await db.prepare(`SELECT COALESCE(SUM(l.debit-l.credit),0) AS balance FROM journal_lines l JOIN journal j ON j.id=l.entry_id WHERE j.company_id=? AND l.account=?`).get(companyId,`wallet:${id}`);
+    if(balance<0)fail(409,'insufficient_funds');integer(balance,'wallet_balance');
+    await db.prepare('UPDATE wallets SET balance=? WHERE company_id=? AND id=?').run(balance,companyId,id);
+  }
+}
+
 export async function postJournal(db, company, input) {
   const projectId = await projectReference(db, company.id, input.projectId);
   const ledgerScope = scope(input.scope);
@@ -33,6 +46,7 @@ export async function postJournal(db, company, input) {
     id, company.id, ledgerScope, company.currency,
     text(input.description, 'description', 500), JSON.stringify(lines), new Date().toISOString(), date, projectId));
   for (const [position,line] of lines.entries()) await db.prepare('INSERT INTO journal_lines VALUES(?,?,?,?,?)').run(id,position,line.account,line.debit,line.credit);
+  await syncWalletBalances(db,company.id,lines);
   return { id, projectId, scope: ledgerScope, currency: company.currency, businessDate: date, lines };
 }
 

@@ -1,7 +1,7 @@
 import { registerProjectRoutes } from './projects.js';
 import { randomUUID } from 'node:crypto';
 import { fail, integer, scope, text, businessDate } from './security.js';
-import { allocate, postJournal, orderInput, normalizeLines, projectReference } from './accounting.js';
+import { allocate, postJournal, orderInput, normalizeLines, projectReference, syncWalletBalances } from './accounting.js';
 import { accountReference } from './legal.js';
 
 const now = () => new Date().toISOString();
@@ -17,10 +17,9 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     integer(Math.abs(amount), 'amount', 1);
     if (row.balance + amount < 0) fail(409, 'insufficient_funds');
     integer(row.balance + amount, 'wallet_balance');
-    (await db.prepare('UPDATE wallets SET balance=balance+? WHERE id=?').run(amount, id));
     const entryId = randomUUID();
-    (await db.prepare('INSERT INTO wallet_entries VALUES(?,?,?,?,?,?,?)').run(entryId, companyId, id, amount, kind, reference, now()));
-    return { ...row, balance: row.balance + amount };
+    (await db.prepare('INSERT INTO wallet_entries(id,company_id,wallet_id,amount,kind,reference_id,created_at) VALUES(?,?,?,?,?,?,?)').run(entryId, companyId, id, amount, kind, reference, now()));
+    return { ...row, entryId, balance: row.balance + amount };
   };
   const requireReference = async (companyId, kind, id) => {
     if (!(await db.prepare('SELECT 1 FROM documents WHERE company_id=? AND kind=? AND id=?').get(companyId, kind, text(id, 'referenceId')))) fail(404, 'catalog_reference_not_found');
@@ -29,6 +28,25 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if (amount) return (await postJournal(db, company, { scope: ledgerScope, projectId, description, lines: [{ account: debit, debit: amount }, { account: credit, credit: amount }] }));
   };
   registerProjectRoutes({ route, db, access, command, object });
+  route('GET','/settings',async request=>{
+    const company=await access(request,'organization.read');
+    const row=await db.prepare('SELECT * FROM company_settings WHERE company_id=?').get(company.id);
+    return row??{company_id:company.id,legal_name:company.name,identifier:null,legal_form:null,tax_regime:null,vat_registered:false,version:0};
+  });
+  route('PUT','/settings',request=>command(request,'organization.write','company.settings',async company=>{
+    const body=object(request.body);
+    const old=await db.prepare('SELECT * FROM company_settings WHERE company_id=?').get(company.id);
+    if(body.version!==(old?.version??0))fail(409,'version_conflict');
+    if(!['TOO','IP'].includes(body.legalForm))fail(400,'invalid_legal_form');
+    if(!['GENERAL','SIMPLIFIED'].includes(body.taxRegime))fail(400,'invalid_tax_regime');
+    if(typeof body.vatRegistered!=='boolean')fail(400,'invalid_vat_registration');
+    const identifier=body.identifier===null||body.identifier===''?null:text(body.identifier,'identifier',12);
+    if(identifier!==null&&!/^[0-9]{12}$/.test(identifier))fail(400,'invalid_identifier');
+    const name=text(body.legalName,'legalName',250),version=(old?.version??0)+1;
+    if(old)await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'company_settings',company.id,JSON.stringify(old),request.user.id);
+    await db.prepare(`INSERT INTO company_settings VALUES(?,?,?,?,?,?,?) ON CONFLICT(company_id) DO UPDATE SET legal_name=excluded.legal_name,identifier=excluded.identifier,legal_form=excluded.legal_form,tax_regime=excluded.tax_regime,vat_registered=excluded.vat_registered,version=excluded.version`).run(company.id,name,identifier,body.legalForm,body.taxRegime,body.vatRegistered,version);
+    return await db.prepare('SELECT * FROM company_settings WHERE company_id=?').get(company.id);
+  }));
   route('GET','/accounting/chart',async request=>{
     const company=await access(request,'accounting.read');
     return accountReference(request.query.asOf??businessDate(undefined,company.timezone));
@@ -46,7 +64,11 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
   })));
   route('GET', '/wallets/:id/entries', async request => {
     (await access(request, 'wallets.read')); (await wallet(request.params.companyId, request.params.id));
-    return { items: (await db.prepare('SELECT * FROM wallet_entries WHERE company_id=? AND wallet_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId, request.params.id, request.query.after ?? '', pageLimit(request.query))) };
+    const project=request.query.projectId;
+    if(project!==undefined&&project!=='unassigned')await projectReference(db,request.params.companyId,project);
+    const filter=project===undefined?'':' AND j.project_id IS NOT DISTINCT FROM ?';
+    const rows=await db.prepare(`SELECT e.*,j.project_id,j.description,j.business_date FROM wallet_entries e LEFT JOIN journal j ON j.id=e.journal_id WHERE e.company_id=? AND e.wallet_id=? AND e.id>?${filter} ORDER BY e.id LIMIT ?`).all(request.params.companyId,request.params.id,request.query.after??'',...(project===undefined?[]:[project==='unassigned'?null:project]),pageLimit(request.query));
+    return {items:rows,nextCursor:rows.length===pageLimit(request.query)?rows.at(-1).id:null};
   });
   route('POST', '/wallets/:id/transactions', async request => (await command(request, 'wallets.transact', 'wallet.transaction', async company => {
     const body = object(request.body), amount = integer(body.amount, 'amount', 1), type = body.type;
@@ -55,10 +77,35 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const description = text(body.description, 'description', 500);
     const result = (await applyWallet(company.id, row.id, type === 'EXPENSE' ? -amount : amount, type, id));
     const account = `wallet:${row.id}`;
-    if (type === 'EXPENSE') (await journal(company, row.scope, description, 'expenses', account, amount, body.projectId));
-    else (await journal(company, row.scope, description, account, type === 'CAPITAL' ? 'capital' : 'revenue', amount, body.projectId));
-    return { id, walletId: row.id, balance: result.balance, amount, type };
+    const posting = type === 'EXPENSE'
+      ? await journal(company, row.scope, description, 'expenses', account, amount, body.projectId)
+      : await journal(company, row.scope, description, account, type === 'CAPITAL' ? 'capital' : 'revenue', amount, body.projectId);
+    await db.prepare('UPDATE wallet_entries SET journal_id=? WHERE id=?').run(posting.id,result.entryId);
+    return { id, entryId:result.entryId, walletId: row.id, balance: result.balance, amount, type };
   })));
+  route('PUT','/wallets/:id/entries/:entryId',request=>command(request,'wallets.transact','wallet.transaction.edit',async company=>{
+    const body=object(request.body),row=await wallet(company.id,request.params.id);
+    const old=await db.prepare('SELECT * FROM wallet_entries WHERE company_id=? AND wallet_id=? AND id=?').get(company.id,row.id,request.params.entryId);
+    if(!old)fail(404,'wallet_entry_not_found');
+    if(!['INCOME','EXPENSE','CAPITAL'].includes(old.kind)||!old.journal_id)fail(422,'transaction_requires_reconciliation');
+    const type=body.type??old.kind,amount=integer(body.amount??Math.abs(old.amount),'amount',1);
+    if(!['INCOME','EXPENSE','CAPITAL'].includes(type))fail(400,'invalid_transaction_type');
+    const signed=type==='EXPENSE'?-amount:amount,balance=row.balance-old.amount+signed;
+    if(balance<0)fail(409,'insufficient_funds');integer(balance,'wallet_balance');
+    const previous=await db.prepare('SELECT * FROM journal WHERE company_id=? AND id=?').get(company.id,old.journal_id);
+    const projectId=await projectReference(db,company.id,Object.hasOwn(body,'projectId')?body.projectId:previous.project_id);
+    const description=text(body.description??previous.description,'description',500),reason=text(body.reason??'Wallet transaction edit','reason',500);
+    const date=businessDate(body.businessDate??previous.business_date,company.timezone),account=`wallet:${row.id}`;
+    const lines=type==='EXPENSE'?[{account:'expenses',debit:amount,credit:0},{account,debit:0,credit:amount}]:[{account,debit:amount,credit:0},{account:type==='CAPITAL'?'capital':'revenue',debit:0,credit:amount}];
+    await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'wallet_entry',old.id,JSON.stringify({entry:old,walletBalance:row.balance}),request.user.id);
+    await db.prepare("SELECT set_config('app.edit_reason',?,true)").get(reason);
+    await db.prepare('UPDATE wallet_entries SET amount=?,kind=? WHERE id=?').run(signed,type,old.id);
+    await db.prepare('UPDATE journal SET description=?,lines=?,business_date=?,project_id=? WHERE id=?').run(description,JSON.stringify(lines),date,projectId,previous.id);
+    await db.prepare('DELETE FROM journal_lines WHERE entry_id=?').run(previous.id);
+    for(const [position,line]of lines.entries())await db.prepare('INSERT INTO journal_lines VALUES(?,?,?,?,?)').run(previous.id,position,line.account,line.debit,line.credit);
+    await syncWalletBalances(db,company.id,lines);
+    return {id:old.id,walletId:row.id,amount,type,balance,projectId,businessDate:date,description};
+  }));
   route('POST', '/wallet-transfers', async request => (await command(request, 'wallets.transact', 'wallet.transfer', async company => {
     const body = object(request.body), amount = integer(body.amount, 'amount', 1);
     const source = (await wallet(company.id, body.sourceWalletId)), target = (await wallet(company.id, body.targetWalletId));
@@ -255,9 +302,17 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const body=object(request.body),reason=body.reason===undefined?'Owner requested edit':text(body.reason,'reason',500);
     await db.prepare("SELECT set_config('app.edit_reason',?,true)").get(reason);
     const replacement={id:old.id,projectId:await projectReference(db,company.id,Object.hasOwn(body,'projectId')?body.projectId:old.project_id),scope:scope(body.scope??old.scope),description:text(body.description??old.description,'description',500),businessDate:businessDate(body.businessDate??old.business_date,company.timezone),lines:normalizeLines({lines:body.lines??JSON.parse(old.lines)})};
+    if([...JSON.parse(old.lines),...replacement.lines].some(line=>line.account.startsWith('wallet:')))await access(request,'wallets.transact');
     await db.prepare('UPDATE journal SET scope=?,description=?,lines=?,business_date=?,project_id=? WHERE id=?').run(replacement.scope,replacement.description,JSON.stringify(replacement.lines),replacement.businessDate,replacement.projectId,old.id);
     await db.prepare('DELETE FROM journal_lines WHERE entry_id=?').run(old.id);
     for(const [position,line]of replacement.lines.entries())await db.prepare('INSERT INTO journal_lines VALUES(?,?,?,?,?)').run(old.id,position,line.account,line.debit,line.credit);
+    const linked=await db.prepare('SELECT * FROM wallet_entries WHERE company_id=? AND journal_id=?').all(company.id,old.id);
+    for(const entry of linked){
+      const amount=replacement.lines.filter(line=>line.account===`wallet:${entry.wallet_id}`).reduce((sum,line)=>sum+line.debit-line.credit,0);
+      await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'wallet_entry',entry.id,JSON.stringify(entry),request.user.id);
+      await db.prepare('UPDATE wallet_entries SET amount=?,kind=? WHERE id=?').run(amount,amount<0?'EXPENSE':replacement.lines.some(line=>line.account==='capital'&&line.credit>0)?'CAPITAL':amount>0?'INCOME':'JOURNAL',entry.id);
+    }
+    await syncWalletBalances(db,company.id,[...JSON.parse(old.lines),...replacement.lines]);
     return {...replacement,id:old.id,reason};
   }));
   route('GET','/accounting/journal/:id/history',async request=>{
