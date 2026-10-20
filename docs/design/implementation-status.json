@@ -140,8 +140,8 @@
       "platform": "desktop",
       "status": "partial",
       "visual_parity_verified": false,
-      "source": "lib/workspace/catalog_workspace.dart",
-      "implemented_scope": "Реквизиты контрагента; полная карточка взаиморасчётов ещё не выполнена"
+      "source": "lib/workspace/counterparty_workspace.dart",
+      "implemented_scope": "Карточка клиента/поставщика, расчёты услуг по проводкам, авансы, период/проект/вид учёта, документы и переход к основанию; начальные долги, товары и ОС пока отдельно"
     },
     {
       "id": "D-17",

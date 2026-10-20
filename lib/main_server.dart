@@ -1088,52 +1088,65 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                                 }),
                         ),
                       ),
-                      SizedBox(
-                        width: 240,
-                        child: DropdownButton<String>(
-                          value: selected ?? 'all',
-                          isExpanded: true,
-                          items: [
-                            const DropdownMenuItem(
-                              value: 'all',
-                              child: Text('Вся фирма'),
-                            ),
-                            const DropdownMenuItem(
-                              value: 'unassigned',
-                              child: Text('Общие операции'),
-                            ),
-                            ...projects.map(
-                              (p) => DropdownMenuItem(
-                                value: p['id'] as String,
-                                child: Text(
-                                  p['name'] as String,
-                                  overflow: TextOverflow.ellipsis,
+                      if ([
+                        'sales',
+                        'purchases',
+                        'employees',
+                        'reports',
+                        'journal',
+                      ].contains(section))
+                        SizedBox(
+                          width: 240,
+                          child: DropdownButton<String>(
+                            value: selected ?? 'all',
+                            isExpanded: true,
+                            items: [
+                              const DropdownMenuItem(
+                                value: 'all',
+                                child: Text('Вся фирма'),
+                              ),
+                              const DropdownMenuItem(
+                                value: 'unassigned',
+                                child: Text('Общие операции'),
+                              ),
+                              ...projects.map(
+                                (p) => DropdownMenuItem(
+                                  value: p['id'] as String,
+                                  child: Text(
+                                    p['name'] as String,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                          onChanged: busy
-                              ? null
-                              : (id) => perform(() async {
-                                  selected = id == 'all' ? null : id;
-                                  await refresh();
-                                }),
+                            ],
+                            onChanged: busy
+                                ? null
+                                : (id) => perform(() async {
+                                    selected = id == 'all' ? null : id;
+                                    await refresh();
+                                  }),
+                          ),
                         ),
-                      ),
                       IconButton(
                         tooltip: 'Обновить доступ и данные',
                         onPressed: busy ? null : () => perform(refreshAccess),
                         icon: const Icon(Icons.refresh),
                       ),
-                      TextButton.icon(
-                        onPressed: busy ? null : choosePeriod,
-                        icon: const Icon(Icons.date_range),
-                        label: Text(
-                          period == null
-                              ? 'За всё время'
-                              : '${date(period!.start)} — ${date(period!.end)}',
+                      if ([
+                        'sales',
+                        'purchases',
+                        'reports',
+                        'journal',
+                      ].contains(section))
+                        TextButton.icon(
+                          onPressed: busy ? null : choosePeriod,
+                          icon: const Icon(Icons.date_range),
+                          label: Text(
+                            period == null
+                                ? 'За всё время'
+                                : '${date(period!.start)} — ${date(period!.end)}',
+                          ),
                         ),
-                      ),
                       if (size.maxWidth < 1000)
                         IconButton(
                           tooltip: 'Фирма',
@@ -1237,6 +1250,9 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           api: api,
                           companyId: company!.id,
                           mode: section,
+                          currency: company!.currency,
+                          projects: projects,
+                          onChanged: refresh,
                         ),
                 ),
               ],

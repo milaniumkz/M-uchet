@@ -908,3 +908,30 @@ test('bank reconciliation links existing money without duplicating journals and 
  assert.equal((await f.api('POST',stalePath+'/post',{version:2})).status,409);
  assert.equal((await f.api('GET',`/bank-imports/${another.id}`)).body.items[0].journal_id,null);
 });
+
+test('counterparty service statement reconciles advances, recognition, corrections and payment void/restore without duplicates',async t=>{
+ const f=await commercialFixture(t),path=`/counterparties/clients/${f.client.id}/service-statement`;
+ const invoice=(await f.api('POST','/commercial-documents',{...f.body,kind:'SALE_INVOICE'})).body;
+ await f.api('POST',`/commercial-documents/${invoice.id}/post`,{});
+ const paid=(await f.api('POST',`/commercial-documents/${invoice.id}/payments`,{walletId:f.wallet.id,amount:4000,businessDate:'2026-10-19'})).body;
+ let r=await f.api('GET',path);assert.equal(r.status,200);assert.equal(r.body.accounts.find(a=>a.account==='customer_advances').closing,-4000);assert.equal(r.body.accounts.find(a=>a.account==='receivables').closing,0);
+ const act=(await f.api('POST',`/commercial-documents/${invoice.id}/act`,{})).body;
+ await f.api('POST',`/commercial-documents/${act.id}/post`,{});
+ r=await f.api('GET',path+'?from=2026-10-20&to=2026-10-20');assert.equal(r.status,200);
+ assert.equal(r.body.accounts.find(a=>a.account==='customer_advances').opening,-4000);assert.equal(r.body.accounts.find(a=>a.account==='customer_advances').closing,0);assert.equal(r.body.accounts.find(a=>a.account==='receivables').closing,6000);
+ const doc=(await f.api('GET',`/commercial-documents/${act.id}`)).body;
+ const revised=await f.api('PUT',`/commercial-documents/${act.id}`,{...f.body,version:doc.version,items:[{description:'Corrected service',quantity:'1.000',unitPrice:3000}],reason:'SYNTHETIC COUNTERPARTY CORRECTION'});assert.equal(revised.status,200);
+ r=await f.api('GET',path);assert.equal(r.body.accounts.find(a=>a.account==='receivables').closing,0);assert.equal(r.body.accounts.find(a=>a.account==='customer_advances').closing,-1000);
+ assert.equal((await f.api('POST',`/commercial-documents/${invoice.id}/payments/${paid.id}/void`,{})).status,200);
+ r=await f.api('GET',path);assert.equal(r.body.accounts.find(a=>a.account==='receivables').closing,3000);assert.equal(r.body.accounts.find(a=>a.account==='customer_advances').closing,0);
+ assert.equal((await f.api('POST',`/commercial-documents/${invoice.id}/payments/${paid.id}/restore`,{})).status,200);
+ r=await f.api('GET',path);assert.equal(r.body.accounts.find(a=>a.account==='receivables').closing,0);assert.equal(r.body.accounts.find(a=>a.account==='customer_advances').closing,-1000);
+ const first=await f.api('GET',path+'?limit=1');assert.equal(first.body.items.length,1);assert.ok(first.body.nextCursor);
+ const second=await f.api('GET',path+'?limit=1&after='+first.body.nextCursor);assert.notEqual(second.body.items[0].id,first.body.items[0].id);
+ assert.deepEqual(first.body.accounts,r.body.accounts,'pagination does not change totals');
+ assert.ok((await f.api('GET',path+'?projectId=unassigned')).body.accounts.every(a=>a.closing===0));
+ assert.equal((await f.api('GET',`/counterparties/suppliers/${f.client.id}/service-statement`)).status,404);
+ assert.equal((await f.api('GET',path+'?scope=BOTH')).status,400);
+ const other=await f.user('statement-other@example.test');assert.equal((await f.call('GET',f.prefix+path,undefined,other.token)).status,404);
+ const list=await f.api('GET','/commercial-documents?counterpartyId='+f.supplier.id);assert.equal(list.body.summary.count,0);
+});
