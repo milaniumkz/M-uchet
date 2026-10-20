@@ -7,85 +7,142 @@ import 'package:uchet_s_d/backend/rest/repositories.dart';
 
 void main() {
   test(
-      'session is accepted only from a valid server login and sent as a header',
-      () async {
-    final token = List.filled(43, 'A').join();
-    final api = BackendClient(
+    'session is accepted only from a valid server login and sent as a header',
+    () async {
+      final token = List.filled(43, 'A').join();
+      final api = BackendClient(
         origin: Uri.parse('https://example.test'),
         transport: MockClient((request) async {
           if (request.url.path == '/v1/auth/login') {
             expect(request.headers.containsKey('Authorization'), isFalse);
             return http.Response(
-                jsonEncode({
-                  'token': token,
-                  'user': {'id': 'user'}
-                }),
-                200);
+              jsonEncode({
+                'token': token,
+                'user': {'id': 'user'},
+              }),
+              200,
+            );
           }
           expect(request.headers['Authorization'], 'Bearer $token');
           expect(request.url.query.contains(token), isFalse);
           return http.Response(
-              '[{"id":"company","name":"Synthetic","currency":"KZT"}]', 200);
-        }));
-    addTearDown(api.close);
-    final identity = IdentityRepository(api);
-    await identity.login('synthetic', 'test-only-password');
-    expect((await identity.companies()).single.id, 'company');
-  });
-
-  test('401 clears the in-memory session; errors remain visible to the caller',
-      () async {
-    final api = BackendClient(
-        origin: Uri.parse('https://example.test'),
-        transport: MockClient(
-            (_) async => http.Response('{"error":"invalid_session"}', 401)));
-    addTearDown(api.close);
-    var expired=0;api.onUnauthorized=()=>expired++;
-    api.acceptSession(List.filled(43, 'A').join());
-    await expectLater(
-        api.request('GET', ['v1', 'companies']),
-        throwsA(
-            isA<BackendException>().having((e) => e.status, 'status', 401)));
-    expect(api.authenticated, isFalse);
-    expect(expired,1);
-  });
+            '[{"id":"company","name":"Synthetic","currency":"KZT"}]',
+            200,
+          );
+        }),
+      );
+      addTearDown(api.close);
+      final identity = IdentityRepository(api);
+      await identity.login('synthetic', 'test-only-password');
+      expect((await identity.companies()).single.id, 'company');
+    },
+  );
 
   test(
-      'catalog save sends version and retains conflict instead of overwriting silently',
-      () async {
-    final api = BackendClient(
+    '401 clears the in-memory session; errors remain visible to the caller',
+    () async {
+      final api = BackendClient(
+        origin: Uri.parse('https://example.test'),
+        transport: MockClient(
+          (_) async => http.Response('{"error":"invalid_session"}', 401),
+        ),
+      );
+      addTearDown(api.close);
+      var expired = 0;
+      api.onUnauthorized = () => expired++;
+      api.acceptSession(List.filled(43, 'A').join());
+      await expectLater(
+        api.request('GET', ['v1', 'companies']),
+        throwsA(isA<BackendException>().having((e) => e.status, 'status', 401)),
+      );
+      expect(api.authenticated, isFalse);
+      expect(expired, 1);
+    },
+  );
+
+  test(
+    'catalog save sends version and retains conflict instead of overwriting silently',
+    () async {
+      final api = BackendClient(
         origin: Uri.parse('https://example.test'),
         transport: MockClient((request) async {
           expect(jsonDecode(request.body)['version'], 3);
           return http.Response('{"error":"version_conflict"}', 409);
-        }));
-    addTearDown(api.close);
-    api.acceptSession(List.filled(43, 'A').join());
-    await expectLater(
-        CatalogRepository(api, 'company')
-            .save('clients', ResourceDto('id', {}, 3), {'name': 'Changed'}),
-        throwsA(
-            isA<BackendException>().having((e) => e.status, 'status', 409)));
-  });
+        }),
+      );
+      addTearDown(api.close);
+      api.acceptSession(List.filled(43, 'A').join());
+      await expectLater(
+        CatalogRepository(
+          api,
+          'company',
+        ).save('clients', ResourceDto('id', {}, 3), {'name': 'Changed'}),
+        throwsA(isA<BackendException>().having((e) => e.status, 'status', 409)),
+      );
+    },
+  );
 
   test(
-      'deal retries retain the same operation key and never put credentials in URL',
-      () async {
-    final keys = <String?>[];
-    final api = BackendClient(
+    'deal retries retain the same operation key and never put credentials in URL',
+    () async {
+      final keys = <String?>[];
+      final api = BackendClient(
         origin: Uri.parse('http://127.0.0.1:8080'),
         transport: MockClient((request) async {
           keys.add(request.headers['Idempotency-Key']);
           return http.Response('{"id":"order"}', 200);
-        }));
-    addTearDown(api.close);
-    api.acceptSession(List.filled(43, 'A').join());
-    final operation = OperationKey(),
-        repository = DealRepository(api, 'company');
-    await repository.edit('order', {}, operation: operation);
-    await repository.edit('order', {}, operation: operation);
-    expect(keys, [operation.value, operation.value]);
-    expect(() => BackendClient(origin: Uri.parse('http://public.example')),
-        throwsArgumentError);
-  });
+        }),
+      );
+      addTearDown(api.close);
+      api.acceptSession(List.filled(43, 'A').join());
+      final operation = OperationKey(),
+          repository = DealRepository(api, 'company');
+      await repository.edit('order', {}, operation: operation);
+      await repository.edit('order', {}, operation: operation);
+      expect(keys, [operation.value, operation.value]);
+      expect(
+        () => BackendClient(origin: Uri.parse('http://public.example')),
+        throwsArgumentError,
+      );
+    },
+  );
+  test(
+    'wallet selection includes accounts beyond the first page and retains the company date',
+    () async {
+      final seen = <String?>[];
+      final api = BackendClient(
+        origin: Uri.parse('https://api.example.test'),
+        transport: MockClient((request) async {
+          seen.add(request.url.queryParameters['after']);
+          final rows = request.url.queryParameters['after'] == null
+              ? List.generate(
+                  200,
+                  (i) => {
+                    'id': 'wallet-${i.toString().padLeft(3, '0')}',
+                    'name': 'SYNTHETIC WALLET $i',
+                    'balance': 0,
+                  },
+                )
+              : [
+                  {
+                    'id': 'wallet-200',
+                    'name': 'SYNTHETIC LAST WALLET',
+                    'balance': 123,
+                  },
+                ];
+          return http.Response(
+            jsonEncode({'items': rows, 'businessDate': '2026-10-21'}),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      )..acceptSession('a' * 43);
+      addTearDown(api.close);
+      final data = await loadCompanyWallets(api, 'firm');
+      expect((data['items'] as List).length, 201);
+      expect(jsonObject((data['items'] as List).last)['balance'], 123);
+      expect(data['businessDate'], '2026-10-21');
+      expect(seen, [null, 'wallet-199']);
+    },
+  );
 }

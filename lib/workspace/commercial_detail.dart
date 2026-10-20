@@ -1,3 +1,4 @@
+import '../backend/rest/repositories.dart';
 import 'company_access.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
@@ -555,12 +556,10 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   Future<void> load() async {
     try {
       final result = jsonObject(
-        await widget.repository.api.request('GET', [
-          'v1',
-          'companies',
+        await loadCompanyWallets(
+          widget.repository.api,
           widget.repository.companyId,
-          'wallets',
-        ]),
+        ),
       );
       if (mounted) {
         setState(() {

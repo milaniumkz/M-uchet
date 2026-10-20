@@ -1,3 +1,4 @@
+import '../backend/rest/repositories.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import '../backend/rest/api_client.dart';
@@ -694,11 +695,7 @@ class _GoodsPaymentDialogState extends State<GoodsPaymentDialog> {
     setState(() => busy = true);
     try {
       final data = jsonObject(
-        await widget.api.request(
-          'GET',
-          ['v1', 'companies', widget.companyId, 'wallets'],
-          query: {'limit': '200'},
-        ),
+        await loadCompanyWallets(widget.api, widget.companyId),
       );
       if (mounted) {
         setState(() {

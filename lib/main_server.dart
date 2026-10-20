@@ -22,6 +22,7 @@ import 'workspace/cash_workspace.dart';
 import 'workspace/account_dialog.dart';
 import 'workspace/help_workspace.dart';
 import 'workspace/goods_workspace.dart';
+import 'workspace/payroll_workspace.dart';
 import 'workspace/commercial_repository.dart' show moneyText;
 
 void main() => runApp(const AccountingWorkspace());
@@ -66,6 +67,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'inventory': 'Склад',
     'assets': 'Активы',
     'employees': 'Сотрудники',
+    'payroll': 'Зарплата',
     'access': 'Доступ',
     'reports': 'Отчёты',
     'journal': 'Бухгалтерские записи',
@@ -86,6 +88,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'inventory' => can('inventory.read') && can('catalog.read'),
     'assets' => can('assets.read'),
     'employees' => can('employees.read'),
+    'payroll' => can('payroll.read') && can('employees.read'),
     'reports' => can('reports.read') && can('accounting.read'),
     'journal' || 'periods' => can('accounting.read'),
     _ => can('catalog.read'),
@@ -407,13 +410,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     List<Map<String, dynamic>> wallets = [];
     String? today;
     await perform(() async {
-      final data = jsonObject(
-        await api.request(
-          'GET',
-          ['v1', 'companies', company!.id, 'wallets'],
-          query: {'limit': '200'},
-        ),
-      );
+      final data = jsonObject(await loadCompanyWallets(api, company!.id));
       wallets = (data['items'] as List).map(jsonObject).toList();
       today = data['businessDate'] as String?;
     });
@@ -1008,6 +1005,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                       'inventory' => Icons.warehouse_outlined,
                       'assets' => Icons.computer_outlined,
                       'employees' => Icons.badge_outlined,
+                      'payroll' => Icons.calculate_outlined,
                       'access' => Icons.admin_panel_settings_outlined,
                       'help' => Icons.help_outline,
                       'journal' => Icons.menu_book_outlined,
@@ -1130,6 +1128,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                         'purchases',
                         'goods',
                         'employees',
+                        'payroll',
                         'reports',
                         'journal',
                       ].contains(section))
@@ -1267,6 +1266,18 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           key: ValueKey(company!.id),
                           api: api,
                           companyId: company!.id,
+                        )
+                      : section == 'payroll'
+                      ? PayrollWorkspace(
+                          key: ValueKey('${company!.id}:payroll:$selected'),
+                          api: api,
+                          companyId: company!.id,
+                          currency: company!.currency,
+                          projects: projects,
+                          projectId: selected,
+                          onChanged: refresh,
+                          onEmployees: () =>
+                              setState(() => section = 'employees'),
                         )
                       : section == 'employees'
                       ? EmployeesWorkspace(

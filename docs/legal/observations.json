@@ -253,5 +253,13 @@
       "archive_url": "https://old.adilet.zan.kz/rus/archive/docs/V2300032897/01.01.2026",
       "archive_sha256": "9ea0748e7f0d4404df4841252107a0ca3b3c59d8dc4342b08f0a7a38c3eaa009"
     }
-  ]
+  ],
+  "implemented_calculation_scope": {
+    "module": "server/src/payroll-calculation.js",
+    "year": 2026,
+    "scope": "ordinary KZT cash salary, resident Kazakhstan citizen, single employer, no special exemptions",
+    "accountant_accepted": false,
+    "official_declaration_export": false,
+    "note": "Observations remain research evidence, not executable rules. The supported module freezes its rule snapshot per record; see server/docs/PAYROLL.md."
+  }
 }

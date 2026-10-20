@@ -176,8 +176,10 @@
       "id": "D-20",
       "title": "Расчёт зарплаты",
       "platform": "desktop",
-      "status": "not_implemented",
-      "visual_parity_verified": false
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/payroll_workspace.dart",
+      "implemented_scope": "Обычная зарплата2026: предпросмотр, начисление, выплаты, исправления и пересчёт следующих месяцев, проекты, история, внутренний PDF; специальные случаи и200.00 не реализованы"
     },
     {
       "id": "D-21",

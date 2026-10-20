@@ -221,7 +221,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 19);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 20);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -1005,4 +1005,95 @@ test('goods payment correction, void and restore preserve actual wallets, advanc
  const journal=(await f.api('GET',`/accounting/journal/${entry.journal_id}`)).body;assert.equal(journal.sourceOrderId,order.id);
  assert.equal((await f.api('PUT',`/accounting/journal/${entry.journal_id}`,{lines:[{account:'cash',debit:1},{account:'capital',credit:1}]})).status,409);
  assert.equal((await f.api('PUT',path,{...correction,version:1})).status,409);
+});
+
+async function payrollFixture(t){
+ const f=await fixture(t);
+ await f.api('PUT','/settings',{version:0,legalName:'SYNTHETIC PAYROLL FIRM',identifier:'000000000000',legalForm:'TOO',taxRegime:'GENERAL',vatRegistered:false});
+ const employee=(await f.api('POST','/employees',{name:'SYNTHETIC PAYROLL EMPLOYEE',identifier:'000000000001',jobTitle:'SYNTHETIC JOB',hireDate:'2025-01-01',birthDate:'1990-01-01',grossBase:30000000,status:'ACTIVE',resident:true,citizenship:'KZ',standardDeductionDeclaration:true})).body;
+ const a=(await f.api('POST','/projects',{name:'Payroll A'})).body,b=(await f.api('POST','/projects',{name:'Payroll B'})).body;
+ const body={employeeId:employee.id,month:'2026-01',gross:30000000,sex:'M',category:'ORDINARY_CASH_SALARY',singleEmployer:true,policyAcknowledged:true,projectId:a.id};
+ return {...f,employee,a,b,body};
+}
+test('payroll posts exact employer cost and changes paid closed-period wages without inventing a refund',async t=>{
+ const f=await payrollFixture(t);
+ const preview=await f.api('POST','/payroll/preview',f.body);assert.equal(preview.status,200);assert.equal(preview.body.calculation.net,25057500);assert.equal(preview.body.calculation.totalCost,34884000);
+ const draft=(await f.api('POST','/payroll',f.body)).body;assert.equal(draft.status,'DRAFT');assert.equal((await f.api('GET','/accounting/journal')).body.items.length,0);
+ const posted=await f.api('POST',`/payroll/${draft.id}/post`,{version:draft.version});assert.equal(posted.status,200);assert.equal(posted.body.status,'POSTED');
+ const wallet=(await f.api('POST','/wallets',{name:'Salary bank'})).body;await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'CAPITAL',amount:100000000,description:'Payroll funds'});
+ const paid=await f.api('POST',`/payroll/${draft.id}/payments`,{walletId:wallet.id,amount:25057500,businessDate:'2026-01-15'});assert.equal(paid.status,200);
+ const balance=(await f.api('GET','/wallets')).body.items[0].balance;assert.equal(balance,74942500);
+ await f.api('POST','/periods/2026-01/close',{});
+ const current=(await f.api('GET',`/payroll/${draft.id}`)).body;
+ const corrected=await f.api('PUT',`/payroll/${draft.id}`,{...f.body,version:current.version,gross:20000000,projectId:f.b.id,reason:'SYNTHETIC PAYROLL CORRECTION'});assert.equal(corrected.status,200);assert.equal(corrected.body.data.calculation.net,17137500);assert.equal(corrected.body.employeeAdvance,7920000);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,balance);
+ const report=(await f.api('GET','/reports/projects')).body.items;assert.equal(report.find(p=>p.projectId===f.a.id).expenses,0);assert.equal(report.find(p=>p.projectId===f.b.id).expenses,23256000);
+ const trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;assert.equal(trial.find(a=>a.account==='payroll_advances').balance,7920000);assert.equal(trial.find(a=>a.account==='payroll_payable').balance,0);
+});
+test('editing an earlier payroll rebuilds later cumulative deductions and keeps later cash unchanged',async t=>{
+ const f=await payrollFixture(t),jan=(await f.api('POST','/payroll',{...f.body,gross:1000000})).body;
+ assert.equal((await f.api('POST',`/payroll/${jan.id}/post`,{version:jan.version})).status,200);
+ const feb=(await f.api('POST','/payroll',{...f.body,month:'2026-02'})).body;
+ const posted=(await f.api('POST',`/payroll/${feb.id}/post`,{version:feb.version})).body;assert.equal(posted.data.calculation.ipn,133000);
+ const wallet=(await f.api('POST','/wallets',{name:'February salary bank'})).body;await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'CAPITAL',amount:100000000,description:'Payroll funds'});
+ await f.api('POST',`/payroll/${feb.id}/payments`,{walletId:wallet.id,amount:posted.data.calculation.net,businessDate:'2026-03-05'});
+ const balance=(await f.api('GET','/wallets')).body.items[0].balance,oldJanuary=(await f.api('GET',`/payroll/${jan.id}`)).body;
+ assert.equal((await f.api('PUT',`/payroll/${jan.id}`,{...f.body,version:oldJanuary.version,reason:'SYNTHETIC EARLIER MONTH'})).status,200);
+ const changed=(await f.api('GET',`/payroll/${feb.id}`)).body;assert.equal(changed.data.calculation.ipn,1342500);assert.equal(changed.employeeAdvance,1209500);assert.ok(changed.version>posted.version);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,balance);
+});
+test('payroll requires explicit opening context and private permissions, and never assumes missing months are zero',async t=>{
+ const f=await payrollFixture(t),body={...f.body,month:'2026-10'};
+ assert.equal((await f.api('POST','/payroll/preview',body)).body.error,'payroll_opening_or_missing_month_required');
+ const opening=await f.api('PUT',`/payroll/openings/${f.employee.id}`,{version:0,throughMonth:'2026-09',taxableBase:120825000,ipn:12082500,basicUsed:116775000,basicCarry:0,opvBase:270000000,confirmed:true,sourceNote:'SYNTHETIC nine prior months same employer'});assert.equal(opening.status,200);
+ const preview=await f.api('POST','/payroll/preview',body);assert.equal(preview.status,200);assert.equal(preview.body.calculation.ipn,1342500);
+ const record=(await f.api('POST','/payroll',body)).body;assert.ok(record.id);
+ assert.equal((await f.api('PUT',`/payroll/openings/${f.employee.id}`,{version:1,throughMonth:'2026-10',taxableBase:0,ipn:0,basicUsed:0,basicCarry:0,opvBase:0,confirmed:true,sourceNote:'Overlap'})).status,409);
+ const reader=await f.user('payroll-reader@example.test');await f.api('PUT',`/members/${reader.id}`,{permissions:['organization.read','employees.read','reports.read']});
+ assert.equal((await f.call('GET',f.prefix+'/payroll',undefined,reader.token)).status,403);
+ assert.equal((await f.call('POST',f.prefix+'/payroll/preview',body,reader.token)).status,403);
+});
+
+test('payroll cancellation and restoration rebuild later deductions while preserving actual payments',async t=>{
+ const f=await payrollFixture(t),jan=(await f.api('POST','/payroll',f.body)).body;await f.api('POST',`/payroll/${jan.id}/post`,{version:jan.version});
+ const feb=(await f.api('POST','/payroll',{...f.body,month:'2026-02'})).body;await f.api('POST',`/payroll/${feb.id}/post`,{version:feb.version});
+ const wallet=(await f.api('POST','/wallets',{name:'Salary cash'})).body;await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'CAPITAL',amount:100000000,description:'Salary funds'});
+ await f.api('POST',`/payroll/${jan.id}/payments`,{walletId:wallet.id,amount:25057500,businessDate:'2026-02-05'});await f.api('POST',`/payroll/${feb.id}/payments`,{walletId:wallet.id,amount:25057500,businessDate:'2026-03-05'});
+ const balance=(await f.api('GET','/wallets')).body.items[0].balance,current=(await f.api('GET',`/payroll/${jan.id}`)).body;
+ const cancelled=await f.api('POST',`/payroll/${jan.id}/cancel`,{version:current.version});assert.equal(cancelled.status,200);assert.equal(cancelled.body.data.calculation.gross,0);assert.equal(cancelled.body.employeeAdvance,25057500);
+ const recalculated=(await f.api('GET',`/payroll/${feb.id}`)).body;assert.equal(recalculated.data.calculation.ipn,45000);assert.equal(recalculated.outstanding,1297500);
+ const restored=await f.api('POST',`/payroll/${jan.id}/restore`,{version:cancelled.body.version});assert.equal(restored.status,200);assert.equal(restored.body.data.calculation.gross,30000000);assert.equal(restored.body.employeeAdvance,0);
+ assert.equal((await f.api('GET',`/payroll/${feb.id}`)).body.data.calculation.ipn,1342500);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,balance);
+});
+test('salary payment edits, cancellation and restore update a real wallet and protect the source journal',async t=>{
+ const f=await payrollFixture(t),draft=(await f.api('POST','/payroll',f.body)).body;await f.api('POST',`/payroll/${draft.id}/post`,{version:draft.version});
+ const wallet=(await f.api('POST','/wallets',{name:'Salary corrections'})).body;await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'CAPITAL',amount:100000000,description:'Salary funds'});
+ const paid=(await f.api('POST',`/payroll/${draft.id}/payments`,{walletId:wallet.id,amount:25057500,businessDate:'2026-02-05'})).body,path=`/payroll/${draft.id}/payments/${paid.id}`;
+ const edited=await f.api('PUT',path,{version:1,walletId:wallet.id,amount:24000000,businessDate:'2026-01-20',reason:'SYNTHETIC SALARY PAYMENT'});assert.equal(edited.status,200);assert.equal(edited.body.payroll.outstanding,1057500);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,76000000);
+ const voided=await f.api('POST',path+'/void',{version:2});assert.equal(voided.status,200);assert.equal(voided.body.payroll.paid,0);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,100000000);
+ assert.equal((await f.api('POST',path+'/restore',{version:3})).status,200);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,76000000);
+ const source=(await f.api('GET',`/payroll/${draft.id}/payments`)).body.items[0],journal=(await f.api('GET',`/accounting/journal/${source.journal_id}`)).body;assert.equal(journal.sourcePayrollId,draft.id);
+ assert.equal((await f.api('PUT',`/accounting/journal/${source.journal_id}`,{lines:[{account:'cash',debit:1},{account:'capital',credit:1}]})).status,409);
+ assert.equal((await f.api('GET',path+'/history')).body.items.length,3);
+});
+
+test('payroll drafts reject changed cumulative context and require a fresh calculation before posting',async t=>{
+ const f=await payrollFixture(t),path=`/payroll/openings/${f.employee.id}`,opening={version:0,throughMonth:'2026-09',taxableBase:120825000,ipn:12082500,basicUsed:116775000,basicCarry:0,opvBase:270000000,confirmed:true,sourceNote:'SYNTHETIC INITIAL CONTEXT'};
+ assert.equal((await f.api('PUT',path,opening)).status,200);
+ const body={...f.body,month:'2026-10'},draft=(await f.api('POST','/payroll',body)).body;
+ assert.equal((await f.api('PUT',path,{...opening,version:1,taxableBase:120825100,ipn:12082510,basicUsed:116774900,basicCarry:100,sourceNote:'SYNTHETIC CORRECTED CONTEXT'})).status,200);
+ const stale=await f.api('POST',`/payroll/${draft.id}/post`,{version:draft.version});assert.equal(stale.status,409);assert.equal(stale.body.error,'payroll_calculation_changed');
+ assert.equal((await f.api('GET','/accounting/journal')).body.items.length,0);
+ const updated=await f.api('PUT',`/payroll/${draft.id}`,{...body,version:draft.version,reason:'Recalculate changed context'});assert.equal(updated.status,200);assert.equal(updated.body.data.calculation.net,25057510);
+ assert.equal((await f.api('POST',`/payroll/${draft.id}/post`,{version:updated.body.version})).status,200);
+});
+test('payroll save checks the company and employee revisions reviewed in preview',async t=>{
+ const f=await payrollFixture(t),preview=(await f.api('POST','/payroll/preview',f.body)).body;
+ assert.equal(preview.input.company.version,1);assert.equal(preview.input.employee.version,1);
+ await f.api('PUT','/settings',{version:1,legalName:'SYNTHETIC CHANGED COMPANY',identifier:'000000000000',legalForm:'TOO',taxRegime:'GENERAL',vatRegistered:false});
+ const stale=await f.api('POST','/payroll',{...f.body,expectedCompanyVersion:preview.input.company.version,expectedEmployeeVersion:preview.input.employee.version});assert.equal(stale.status,409);
+ assert.equal((await f.api('GET','/payroll')).body.items.length,0);
+ const current=(await f.api('POST','/payroll/preview',f.body)).body;
+ assert.equal((await f.api('POST','/payroll',{...f.body,expectedCompanyVersion:current.input.company.version,expectedEmployeeVersion:current.input.employee.version})).status,200);
 });

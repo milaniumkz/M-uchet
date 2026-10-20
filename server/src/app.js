@@ -1,3 +1,4 @@
+import { registerPayrollRoutes } from './payroll.js';
 import { projectOrderPayments } from './order-payments.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
@@ -493,6 +494,7 @@ export async function createApp(options = {}) {
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
   registerInvitationRoutes(app,{db,auth,owner,object});
+  registerPayrollRoutes(app,{db,auth,access,command,object,pageLimit});
   registerEmployeeRoutes(app,{db,auth,access,command,pageLimit,object});
   registerAssetRoutes(app,{db,auth,access,command,pageLimit,object});
   const commercial=registerCommercialRoutes(app, { db, auth, access, command, pageLimit, object });

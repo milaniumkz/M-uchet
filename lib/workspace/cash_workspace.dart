@@ -1,3 +1,4 @@
+import '../backend/rest/repositories.dart';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
 import '../backend/rest/retriable_command.dart';
@@ -6,6 +7,7 @@ import 'company_access.dart';
 import 'money_transaction_dialog.dart';
 import 'journal_editor.dart';
 import 'goods_workspace.dart';
+import 'payroll_workspace.dart';
 
 const cashKinds = {
   'INCOME': 'Поступление',
@@ -20,6 +22,9 @@ const cashKinds = {
   'PAYMENT_VOID': 'Отмена записи оплаты',
   'PAYMENT_RESTORE': 'Восстановление записи оплаты',
   'DEBT_PAYMENT': 'Погашение задолженности',
+  'PAYROLL_PAYMENT': 'Выплата зарплаты',
+  'PAYROLL_PAYMENT_VOID': 'Отмена записи выплаты зарплаты',
+  'PAYROLL_PAYMENT_RESTORE': 'Восстановление записи выплаты зарплаты',
   'ORDER_PAYMENT': 'Оплата товаров',
   'ORDER_PAYMENT_VOID': 'Отмена записи оплаты товаров',
   'ORDER_PAYMENT_RESTORE': 'Восстановление записи оплаты товаров',
@@ -89,11 +94,7 @@ class _CashWorkspaceState extends State<CashWorkspace> {
     setState(() => busy = true);
     try {
       final w = jsonObject(
-        await widget.api.request(
-          'GET',
-          path(['wallets']),
-          query: {'limit': '200'},
-        ),
+        await loadCompanyWallets(widget.api, widget.companyId),
       );
       if (!mounted) {
         return;
@@ -303,7 +304,18 @@ class _CashWorkspaceState extends State<CashWorkspace> {
       if (!mounted) {
         return;
       }
-      if (data['sourceOrderId'] != null &&
+      if (data['sourcePayrollId'] != null &&
+          hasCompanyPermission(context, 'payroll.read')) {
+        await showPayrollRecord(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          payrollId: data['sourcePayrollId'] as String,
+          currency: widget.currency,
+          projects: widget.projects,
+          onChanged: widget.onChanged,
+        );
+      } else if (data['sourceOrderId'] != null &&
           hasCompanyPermission(context, 'orders.read')) {
         await showGoodsOrder(
           context,
@@ -802,11 +814,7 @@ class _WalletTransferDialogState extends State<WalletTransferDialog> {
     setState(() => busy = true);
     try {
       final w = jsonObject(
-        await widget.api.request(
-          'GET',
-          ['v1', 'companies', widget.companyId, 'wallets'],
-          query: {'limit': '200'},
-        ),
+        await loadCompanyWallets(widget.api, widget.companyId),
       );
       var data = <String, dynamic>{}, h = <Map<String, dynamic>>[];
       if (widget.transferId != null) {

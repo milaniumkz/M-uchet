@@ -65,6 +65,14 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const shift=await request('POST',prefix+'/shifts',{walletId:goodsWallet.id},session.token,key());
  await request('POST',prefix+`/shifts/${shift.id}/close`,{countedAmount:149},session.token,key());
  const invitation=await request('POST',prefix+'/invitations',{login:'synthetic-restored-reader@example.test',name:'SYNTHETIC READER',permissions:['documents.read']},session.token,key());
+ const payroll=await request('POST',prefix+'/payroll',{employeeId:employee.id,month:'2026-01',gross:30000000,sex:'M',standardDeductionDeclaration:true,category:'ORDINARY_CASH_SALARY',singleEmployer:true,policyAcknowledged:true},session.token,key());
+ await request('POST',prefix+`/payroll/${payroll.id}/post`,{version:payroll.version},session.token,key());
+ const salaryWallet=await request('POST',prefix+'/wallets',{name:'SYNTHETIC SALARY RESTORE BANK'},session.token,key());
+ await request('POST',prefix+`/wallets/${salaryWallet.id}/transactions`,{type:'CAPITAL',amount:100000000,description:'SYNTHETIC SALARY FUNDS'},session.token,key());
+ const salaryPayment=await request('POST',prefix+`/payroll/${payroll.id}/payments`,{walletId:salaryWallet.id,amount:1000000,businessDate:'2026-02-05'},session.token,key());
+ const salaryRecord=await request('GET',prefix+`/payroll/${payroll.id}`,undefined,session.token);
+ await request('PUT',prefix+`/payroll/${payroll.id}`,{version:salaryRecord.version,gross:20000000,reason:'SYNTHETIC PAYROLL RESTORE CORRECTION'},session.token,key());
+ await request('POST',prefix+`/payroll/${payroll.id}/payments/${salaryPayment.id}/void`,{version:1},session.token,key());await request('POST',prefix+`/payroll/${payroll.id}/payments/${salaryPayment.id}/restore`,{version:2},session.token,key());
  await app.close();app=undefined;
  const dump=await open(join(directory,'backup.dump'),'wx',0o600);
  try{await docker(['pg_dump','-U','muchet','-d','muchet',`--schema=${schema}`,'--format=custom','--no-owner','--no-acl'],'ignore',dump.fd);}finally{await dump.close();}
@@ -90,5 +98,8 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  assert.equal(wallets.find(w=>w.id===goodsWallet.id).balance,150);
  const shifts=(await restored.inject({url:prefix+'/shifts',headers})).json().items;assert.equal(shifts.find(s=>s.id===shift.id).difference,-1);
  const invitations=(await restored.inject({url:prefix+'/invitations',headers})).json().items;assert.ok(invitations.some(i=>i.id===invitation.id));
+ const salaryCopy=(await restored.inject({url:prefix+`/payroll/${payroll.id}`,headers})).json();assert.equal(salaryCopy.data.calculation.net,17137500);assert.equal(salaryCopy.paid,1000000);assert.equal(salaryCopy.data.ruleSnapshot.version,'KZ_REGULAR_RESIDENT_PAYROLL_2026_V1');
+ const salaryPayments=(await restored.inject({url:prefix+`/payroll/${payroll.id}/payments`,headers})).json().items;assert.equal(salaryPayments[0].version,3);assert.equal(salaryPayments[0].voided,false);
+ assert.equal(wallets.find(w=>w.id===salaryWallet.id).balance,99000000);
  const file=await restored.inject({url:prefix+'/files/'+uploaded.id,headers});assert.equal(file.body,'SYNTHETIC RESTORE CONTENT');
 });

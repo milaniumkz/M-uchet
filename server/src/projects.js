@@ -42,7 +42,7 @@ export function registerProjectRoutes({ route, db, access, command, object }) {
       const bucket=buckets.get(row.project_id);
       if(line.account==='revenue')bucket.revenue+=line.credit-line.debit;
       if(line.account==='cogs')bucket.cogs+=line.debit-line.credit;
-      if(['expenses','inventory_loss','depreciation','asset_disposal_loss'].includes(line.account))bucket.expenses+=line.debit-line.credit;
+      if(['expenses','inventory_loss','depreciation','asset_disposal_loss','salary_expense','payroll_employer_expense'].includes(line.account))bucket.expenses+=line.debit-line.credit;
     }
     const items=[...buckets.values()];
     const total=empty();

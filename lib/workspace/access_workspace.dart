@@ -24,6 +24,7 @@ const permissionGroups = {
   'bank': 'Банковские выписки',
   'assets': 'Основные средства',
   'employees': 'Кадровые данные и оклады',
+  'payroll': 'Зарплата и удержания',
 };
 const permissionActions = {
   'read': 'Просмотр',
@@ -316,7 +317,12 @@ class _AccessEditorState extends State<AccessEditor> {
           widget.available.where((p) => !p.startsWith('devices.')).toSet(),
         'viewer' =>
           widget.available
-              .where((p) => p.endsWith('.read') && !p.startsWith('employees.'))
+              .where(
+                (p) =>
+                    p.endsWith('.read') &&
+                    !p.startsWith('employees.') &&
+                    !p.startsWith('payroll.'),
+              )
               .toSet(),
         'operator' => {
           'catalog.read',

@@ -13,6 +13,7 @@ import 'input_dialogs.dart';
 import 'assets_workspace.dart';
 import 'cash_workspace.dart';
 import 'goods_workspace.dart';
+import 'payroll_workspace.dart';
 
 const ledgerLabels = {
   'fixed_assets': 'Основные средства',
@@ -26,6 +27,17 @@ const ledgerLabels = {
   'cogs': 'Себестоимость',
   'receivables': 'Дебиторская задолженность',
   'payables': 'Кредиторская задолженность',
+  'salary_expense': 'Начисленная зарплата',
+  'payroll_employer_expense': 'Взносы и налоги работодателя',
+  'payroll_payable': 'Задолженность по зарплате',
+  'payroll_advances': 'Авансы сотрудникам',
+  'payroll_opv': 'ОПВ к перечислению',
+  'payroll_vosms': 'ВОСМС к перечислению',
+  'payroll_ipn': 'ИПН с зарплаты к перечислению',
+  'payroll_so': 'Социальные отчисления к перечислению',
+  'payroll_oosms': 'ОСМС работодателя к перечислению',
+  'payroll_opvr': 'ОПВР к перечислению',
+  'payroll_sn': 'Социальный налог к перечислению',
   'inventory': 'Запасы',
   'customer_advances': 'Авансы покупателей',
   'supplier_advances': 'Авансы поставщикам',
@@ -181,6 +193,17 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
           companyId: widget.companyId,
           currency: widget.currency,
           transferId: details['sourceTransferId'] as String,
+        );
+      } else if (details['sourcePayrollId'] != null &&
+          hasCompanyPermission(context, 'payroll.read')) {
+        await showPayrollRecord(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          payrollId: details['sourcePayrollId'] as String,
+          currency: widget.currency,
+          projects: widget.projects,
+          onChanged: widget.onChanged,
         );
       } else if (details['sourceOrderId'] != null &&
           hasCompanyPermission(context, 'orders.read')) {

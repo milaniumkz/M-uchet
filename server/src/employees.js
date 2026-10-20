@@ -11,9 +11,10 @@ export function registerEmployeeRoutes(app,{db,auth,access,command,object,pageLi
   const hireDate=businessDate(body.hireDate),birthDate=body.birthDate?businessDate(body.birthDate):null,terminationDate=body.terminationDate?businessDate(body.terminationDate):null;
   if(birthDate&&birthDate>=hireDate||terminationDate&&terminationDate<hireDate)fail(400,'invalid_employee_dates');
   if(!['ACTIVE','INACTIVE'].includes(body.status)||typeof body.resident!=='boolean'||typeof body.standardDeductionDeclaration!=='boolean')fail(400,'invalid_employee_profile');
+  if(body.sex!==undefined&&body.sex!==null&&!['M','F'].includes(body.sex))fail(400,'invalid_employee_profile');
   const citizenship=text(body.citizenship,'citizenship',2).toUpperCase();if(!/^[A-Z]{2}$/.test(citizenship))fail(400,'invalid_employee_profile');
   const notes=typeof body.notes==='string'?body.notes.trim():'';if(notes.length>2000)fail(400,'invalid_notes');
-  return {name,identifier,jobTitle,hireDate,birthDate,terminationDate,status:body.status,grossBase:integer(body.grossBase,'grossBase'),projectId:await projectReference(db,company.id,body.projectId),data:{resident:body.resident,citizenship,standardDeductionDeclaration:body.standardDeductionDeclaration,notes}};
+  return {name,identifier,jobTitle,hireDate,birthDate,terminationDate,status:body.status,grossBase:integer(body.grossBase,'grossBase'),projectId:await projectReference(db,company.id,body.projectId),data:{sex:body.sex??null,resident:body.resident,citizenship,standardDeductionDeclaration:body.standardDeductionDeclaration,notes}};
  };
  route('GET','',async request=>{
   const company=await access(request,'employees.read'),search=typeof request.query.q==='string'?request.query.q.trim():'';

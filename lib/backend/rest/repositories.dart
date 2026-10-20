@@ -163,3 +163,35 @@ class DealRepository {
     ),
   );
 }
+
+/// Read every selectable account, retaining the company business date from the
+/// first page. Financial mutations still recheck the current account on server.
+Future<Map<String, dynamic>> loadCompanyWallets(
+  BackendClient api,
+  String companyId,
+) async {
+  final items = <Map<String, dynamic>>[], seen = <String>{};
+  String? after, date;
+  do {
+    final data = jsonObject(
+      await api.request(
+        'GET',
+        ['v1', 'companies', companyId, 'wallets'],
+        query: {'limit': '200', if (after != null) 'after': after},
+      ),
+    );
+    date ??= data['businessDate'] as String?;
+    if (data['items'] is! List) {
+      throw const BackendException('invalid_server_response');
+    }
+    final rows = (data['items'] as List).map(jsonObject).toList();
+    for (final row in rows) {
+      if (row['id'] is! String || !seen.add(row['id'] as String)) {
+        throw const BackendException('invalid_server_response');
+      }
+    }
+    items.addAll(rows);
+    after = rows.length < 200 ? null : rows.last['id'] as String;
+  } while (after != null);
+  return {'items': items, if (date != null) 'businessDate': date};
+}

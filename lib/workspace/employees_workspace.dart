@@ -198,6 +198,7 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
       citizenship = TextEditingController(text: 'KZ'),
       notes = TextEditingController();
   String status = 'ACTIVE';
+  String? sex;
   String? projectId, error;
   bool resident = true, declaration = false, busy = false;
   RetriableCommand? pending;
@@ -219,6 +220,7 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
       gross.text =
           '${amount ~/ 100}.${(amount % 100).toString().padLeft(2, '0')}';
       citizenship.text = d['citizenship'] as String;
+      sex = d['sex'] as String?;
       resident = d['resident'] == true;
       declaration = d['standardDeductionDeclaration'] == true;
       notes.text = d['notes'] as String;
@@ -294,6 +296,7 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
           'projectId': projectId,
           'resident': resident,
           'citizenship': citizenship.text,
+          'sex': sex,
           'standardDeductionDeclaration': declaration,
           'notes': notes.text,
           if (widget.employee != null) 'version': widget.employee!['version'],
@@ -399,6 +402,22 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
                         () => projectId = v == 'unassigned' ? null : v,
                       ),
               ),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: sex ?? 'unknown',
+                items: const [
+                  DropdownMenuItem(value: 'unknown', child: Text('Не указан')),
+                  DropdownMenuItem(value: 'M', child: Text('Мужской')),
+                  DropdownMenuItem(value: 'F', child: Text('Женский')),
+                ],
+                onChanged: busy || pending != null
+                    ? null
+                    : (v) => setState(() => sex = v == 'unknown' ? null : v),
+                decoration: const InputDecoration(
+                  labelText: 'Пол для расчёта пенсионного возраста',
+                ),
+              ),
+              const SizedBox(height: 12),
               CheckboxListTile(
                 value: resident,
                 onChanged:

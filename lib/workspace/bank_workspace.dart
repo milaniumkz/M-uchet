@@ -1,3 +1,4 @@
+import '../backend/rest/repositories.dart';
 import 'company_access.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'input_dialogs.dart';
 import 'cash_workspace.dart';
 import 'journal_editor.dart';
 import 'goods_workspace.dart';
+import 'payroll_workspace.dart';
 
 const bankCategories = {
   'INCOME': 'Доход',
@@ -62,11 +64,7 @@ class _BankWorkspaceState extends State<BankWorkspace> {
     setState(() => busy = true);
     try {
       final money = jsonObject(
-        await widget.api.request(
-          'GET',
-          ['v1', 'companies', widget.companyId, 'wallets'],
-          query: {'limit': '200'},
-        ),
+        await loadCompanyWallets(widget.api, widget.companyId),
       );
       final statements = jsonObject(await widget.api.request('GET', path()));
       var next = <Map<String, dynamic>>[];
@@ -169,6 +167,22 @@ class _BankWorkspaceState extends State<BankWorkspace> {
   }
 
   Future<void> reviewSource(Map<String, dynamic> row) async {
+    if (row['source_payroll_id'] != null &&
+        hasCompanyPermission(context, 'payroll.read')) {
+      await showPayrollRecord(
+        context,
+        api: widget.api,
+        companyId: widget.companyId,
+        payrollId: row['source_payroll_id'] as String,
+        currency: widget.currency,
+        projects: widget.projects,
+        onChanged: widget.onChanged,
+      );
+      if (mounted) {
+        await load();
+      }
+      return;
+    }
     if (row['source_order_id'] != null &&
         hasCompanyPermission(context, 'orders.read')) {
       await showGoodsOrder(
