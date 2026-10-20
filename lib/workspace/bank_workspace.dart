@@ -313,6 +313,66 @@ class _BankWorkspaceState extends State<BankWorkspace> {
     }
   }
 
+  Future<void> unmatch(Map<String, dynamic> row) async {
+    final reason = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Снять сопоставление'),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Строка выписки вернётся к выбору операции. Сам платёж и проводки сохранятся.',
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: reason,
+                    maxLength: 500,
+                    maxLines: 3,
+                    onChanged: (_) => update(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Причина снятия сопоставления',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Назад'),
+            ),
+            FilledButton(
+              onPressed: reason.text.trim().isEmpty
+                  ? null
+                  : () => Navigator.pop(context, true),
+              child: const Text('Снять связь'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final value = reason.text.trim();
+    // Dialog exit animation can still build its text field.
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    reason.dispose();
+    if (confirmed != true || !mounted) return;
+    await execute(
+      row['id'] as String,
+      RetriableCommand(
+        'POST',
+        [...path(selectedImport), 'rows', row['id'] as String, 'unmatch'],
+        {'version': row['version'], 'reason': value},
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(28),
@@ -451,17 +511,33 @@ class _BankWorkspaceState extends State<BankWorkspace> {
                   Text(
                     row['payment_voided'] == true
                         ? 'Запись оплаты отменена'
+                        : [
+                            'SOURCE_CHANGED',
+                            'SOURCE_MISSING',
+                          ].contains(row['reconciliation_status'])
+                        ? 'Требует повторной сверки'
                         : row['journal_id'] != null
                         ? 'Проведено'
                         : bankCategories[row['classification']] ??
                               'Требует сопоставления',
                   ),
+                  if (row['reconciliation_status'] == 'SOURCE_CHANGED')
+                    Text(
+                      'Учтённая операция: ${moneyText(row['current_amount'] as num, widget.currency)} · ${row['current_business_date']}',
+                      style: const TextStyle(color: Color(0xFF9A5800)),
+                    ),
+                  if (row['reconciliation_status'] == 'SOURCE_MISSING')
+                    const Text(
+                      'Связанного денежного движения на этом счёте больше нет. Проверьте исходную операцию.',
+                      style: TextStyle(color: Color(0xFF9A5800)),
+                    ),
                   Wrap(
                     spacing: 12,
                     children: [
                       TextButton(
                         onPressed:
                             busy ||
+                                pending.containsKey(row['id']) ||
                                 !(row['journal_id'] == null
                                     ? hasCompanyPermission(
                                         context,
@@ -484,6 +560,31 @@ class _BankWorkspaceState extends State<BankWorkspace> {
                               : 'Сопоставить',
                         ),
                       ),
+                      if (pending.containsKey(row['id']))
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => execute(
+                                  row['id'] as String,
+                                  pending[row['id']]!,
+                                ),
+                          child: const Text('Повторить действие со строкой'),
+                        ),
+                      if (row['journal_id'] != null &&
+                          row['classification'] == 'EXISTING')
+                        TextButton(
+                          onPressed:
+                              busy ||
+                                  pending.containsKey(row['id']) ||
+                                  !hasCompanyPermission(
+                                    context,
+                                    'bank.review',
+                                  ) ||
+                                  !hasCompanyPermission(context, 'bank.post')
+                              ? null
+                              : () => unmatch(row),
+                          child: const Text('Снять сопоставление'),
+                        ),
                       if (row['journal_id'] == null &&
                           row['classification'] != null &&
                           row['classification'] != 'IGNORE')

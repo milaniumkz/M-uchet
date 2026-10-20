@@ -207,6 +207,68 @@ void main() {
       expect(find.text('Проведено'), findsOneWidget);
       await click(find.text('Открыть и исправить'));
       expect(edited?['amount'], 789);
+      await tester.runAsync(
+        () => api.request(
+          'PUT',
+          [
+            'v1',
+            'companies',
+            company['id'] as String,
+            'wallets',
+            edited!['wallet_id'] as String,
+            'entries',
+            edited!['id'] as String,
+          ],
+          body: {
+            'type': 'INCOME',
+            'amount': 789,
+            'businessDate': '2026-10-19',
+            'description': 'SYNTHETIC ALREADY ENTERED',
+          },
+          operation: OperationKey(),
+        ),
+      );
+      await click(find.text('Обновить'));
+      expect(find.text('Требует повторной сверки'), findsOneWidget);
+      await click(find.text('Снять сопоставление'));
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Причина снятия сопоставления'),
+        'SYNTHETIC CORRECTION',
+      );
+      await tester.pumpAndSettle();
+      await click(find.text('Снять связь'));
+      expect(find.text('Требует сопоставления'), findsOneWidget);
+      expect(find.text('Проведено'), findsNothing);
+      await tester.runAsync(
+        () => api.request(
+          'PUT',
+          [
+            'v1',
+            'companies',
+            company['id'] as String,
+            'wallets',
+            edited!['wallet_id'] as String,
+            'entries',
+            edited!['id'] as String,
+          ],
+          body: {
+            'type': 'INCOME',
+            'amount': 789,
+            'businessDate': '2026-10-20',
+            'description': 'SYNTHETIC ALREADY ENTERED',
+          },
+          operation: OperationKey(),
+        ),
+      );
+
+      await click(find.text('Сопоставить'));
+      await click(find.text('Вид операции'));
+      await click(find.text('Уже учтённая операция').last);
+      await click(find.text('SYNTHETIC ALREADY ENTERED'));
+      await click(find.text('Сохранить сопоставление'));
+      await click(find.text('Провести'));
+      expect(find.text('Проведено'), findsOneWidget);
+
       await tester.runAsync(() async {
         final wallets = jsonObject(
           await api.request('GET', [

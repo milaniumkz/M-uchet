@@ -1373,3 +1373,38 @@ test('a renamed cash transfer cannot bypass its business source through manual j
  const privateResult=await f.call('GET',f.prefix+'/search?q='+f.debt.id,null,reader.token);
  assert.equal(privateResult.status,200);assert.equal(privateResult.body.items.length,0);
  });
+
+test('bank unmatch releases only an existing link with version, permissions and history while preserving real cash',async t=>{
+ const f=await fixture(t),wallet=(await f.api('POST','/wallets',{name:'SYNTHETIC UNMATCH BANK'})).body;
+ await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'INCOME',amount:1234,businessDate:'2026-01-05',description:'SYNTHETIC REAL PAYMENT'});
+ const source=(await f.api('GET',`/wallets/${wallet.id}/entries`)).body.items[0];
+ const imported=(await f.api('POST','/bank-imports',{walletId:wallet.id,csv:'date;reference;debit;credit;description\n2026-01-05;unmatch-a;0;12.34;SYNTHETIC A\n2026-01-05;unmatch-b;0;12.34;SYNTHETIC B'})).body;
+ const rows=(await f.api('GET',`/bank-imports/${imported.id}`)).body.items;
+ const path=id=>`/bank-imports/${imported.id}/rows/${id}`;
+ await f.api('PUT',path(rows[0].id),{version:1,classification:'EXISTING',entryId:source.id});
+ await f.api('POST',path(rows[0].id)+'/post',{version:2});
+ const before=(await f.api('GET','/accounting/journal')).body.items.length;
+ const reader=await f.user('bank-unmatch-reader@example.test');await f.api('PUT',`/members/${reader.id}`,{permissions:['bank.review']});
+ assert.equal((await f.call('POST',f.prefix+path(rows[0].id)+'/unmatch',{version:3,reason:'Attempt without bank.post'},reader.token,randomUUID())).status,403);
+ assert.equal((await f.api('POST',path(rows[0].id)+'/unmatch',{version:2,reason:'Stale'})).status,409);
+ assert.equal((await f.api('POST',path(rows[0].id)+'/unmatch',{version:3,reason:''})).status,400);
+ const key=randomUUID(),payload={version:3,reason:'SYNTHETIC WRONG LINK'};
+ const cleared=await f.api('POST',path(rows[0].id)+'/unmatch',payload,key);assert.equal(cleared.status,200);assert.equal(cleared.body.version,4);assert.equal(cleared.body.journal_id,null);assert.equal(cleared.body.classification,null);assert.equal(cleared.body.matched_entry_id,null);
+ assert.deepEqual((await f.api('POST',path(rows[0].id)+'/unmatch',payload,key)).body,cleared.body);
+ assert.equal((await f.api('GET','/accounting/journal')).body.items.length,before);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,1234);
+ assert.equal((await f.api('GET',path(rows[1].id)+'/candidates')).body.items[0].id,source.id);
+ const history=await f.app.db.prepare("SELECT snapshot FROM entity_history WHERE company_id=? AND kind='bank_row' AND entity_id=? ORDER BY revision DESC LIMIT 1").get(f.company.id,rows[0].id);assert.equal(history.snapshot.unmatchReason,payload.reason);assert.equal(history.snapshot.journal_id,source.journal_id);
+ await f.api('PUT',path(rows[1].id),{version:1,classification:'EXISTING',entryId:source.id});await f.api('POST',path(rows[1].id)+'/post',{version:2});
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,1234);
+ assert.equal((await f.api('POST',path(rows[0].id)+'/unmatch',{version:4,reason:'Already released'})).status,409);
+ await f.api('PUT',`/wallets/${wallet.id}/entries/${source.id}`,{type:'INCOME',amount:1200,businessDate:'2026-01-05',description:'SYNTHETIC CORRECTED PAYMENT'});
+ assert.equal((await f.api('GET',`/bank-imports/${imported.id}`)).body.items.find(r=>r.id===rows[1].id).reconciliation_status,'SOURCE_CHANGED');
+ assert.equal((await f.api('POST',path(rows[1].id)+'/unmatch',{version:3,reason:'Source corrected after reconciliation'})).status,200);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,1200);
+ const ownImport=(await f.api('POST','/bank-imports',{walletId:wallet.id,csv:'date;reference;debit;credit;description\n2026-01-06;created-bank-income;0;1.00;SYNTHETIC NEW PAYMENT'})).body;
+ const ownRow=(await f.api('GET',`/bank-imports/${ownImport.id}`)).body.items[0],ownPath=`/bank-imports/${ownImport.id}/rows/${ownRow.id}`;
+ await f.api('PUT',ownPath,{version:1,classification:'INCOME'});await f.api('POST',ownPath+'/post',{version:2});
+ assert.equal((await f.api('POST',ownPath+'/unmatch',{version:3,reason:'Cannot disguise removal of new money'})).status,409);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,1300);
+
+});

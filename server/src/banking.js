@@ -61,7 +61,7 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
     const rows=await db.prepare(`SELECT r.*,dp.debt_id AS source_debt_id,COALESCE(NOT dp.active,FALSE) AS debt_payment_inactive,pp.payroll_id AS source_payroll_id,op.order_id AS source_order_id,COALESCE(p.voided,op.voided,pp.voided,NOT dp.active) AS payment_voided,e.id AS wallet_entry_id,e.amount AS current_amount,e.kind AS current_kind,e.reference_id AS current_reference_id,j.description AS current_description,j.business_date AS current_business_date,j.project_id AS current_project_id
       FROM bank_import_rows r LEFT JOIN commercial_payments p ON p.company_id=r.company_id AND p.id=r.payment_id LEFT JOIN wallet_entries e ON e.journal_id=r.journal_id AND e.wallet_id=r.wallet_id
       LEFT JOIN debt_postings dp ON dp.company_id=r.company_id AND dp.journal_id=r.journal_id LEFT JOIN payments op ON op.company_id=r.company_id AND (op.journal_id=r.journal_id OR op.id=e.reference_id) LEFT JOIN payroll_payments pp ON pp.company_id=r.company_id AND (pp.journal_id=r.journal_id OR pp.id=e.reference_id) LEFT JOIN journal j ON j.id=r.journal_id WHERE r.company_id=? AND r.import_id=? ORDER BY r.business_date,r.id`).all(company.id,item.id);
-    return {...item,items:rows};
+    return {...item,items:rows.map(row=>({...row,reconciliation_status:!row.journal_id?'UNMATCHED':row.payment_voided?'PAYMENT_VOIDED':row.current_amount===null?'SOURCE_MISSING':row.current_amount!==row.amount||row.current_business_date!==row.business_date?'SOURCE_CHANGED':'MATCHED'}))};
   });
   const existingEntry = async (request, companyId, row, id) => {
     await access(request,'wallets.read');
@@ -108,6 +108,16 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
     }
     await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'bank_row',row.id,JSON.stringify(row),request.user.id);
     await db.prepare('UPDATE bank_import_rows SET classification=?,project_id=?,document_id=?,matched_entry_id=?,version=version+1 WHERE id=?').run(type,projectId,documentId,type==='EXISTING'?body.entryId:null,row.id);
+    return getRow(company.id,request.params.id,row.id);
+  }));
+  route('POST','/:id/rows/:rowId/unmatch',request=>command(request,'bank.review','bank.unmatch',async company=>{
+    await access(request,'bank.post');
+    const row=await getRow(company.id,request.params.id,request.params.rowId),body=object(request.body);
+    if(body.version!==row.version)fail(409,'version_conflict');
+    if(row.classification!=='EXISTING'||!row.matched_entry_id||!row.journal_id)fail(409,'bank_unmatch_not_available');
+    const reason=text(body.reason,'reason',500);
+    await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'bank_row',row.id,JSON.stringify({...row,unmatchReason:reason}),request.user.id);
+    await db.prepare('UPDATE bank_import_rows SET classification=NULL,project_id=NULL,document_id=NULL,matched_entry_id=NULL,journal_id=NULL,payment_id=NULL,version=version+1 WHERE id=?').run(row.id);
     return getRow(company.id,request.params.id,row.id);
   }));
   route('POST','/:id/rows/:rowId/post',request=>command(request,'bank.post','bank.post',async company=>{

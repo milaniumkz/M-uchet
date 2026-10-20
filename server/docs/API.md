@@ -48,14 +48,14 @@ POST: `{data:{name:"Товар"}}` → `{id,data,version:1,createdAt,updatedAt}`
 {"scope":"ACCOUNTING","items":[{"productId":"…","warehouseId":"…","quantity":4,"unitPrice":20000}]}
 ```
 
-Право `orders.write`, результат `{id,status:"NEW",scope,items,total}`. Каталожные ссылки проверяются в своей компании. Цена пока задаётся уполномоченным оператором, налоговый/скидочный движок отсутствует. Одинаковый товар в одном складе повторять в заказе нельзя.
+Право `orders.write`, результат `{id,status:"NEW",scope,items,total}`. Каталожные ссылки проверяются в своей компании. Цена задаётся уполномоченным оператором; НДС рассчитывается точно по строкам в поддержанной области, подробнее GOODS.md. Одинаковый товар в одном складе повторять в заказе нельзя.
 
 4. `POST /orders/:id/reserve` (`orders.fulfill`): NEW → RESERVED, FIFO, вся операция откатывается при нехватке любой позиции.
 5. `POST /orders/:id/ship` (`orders.fulfill`): RESERVED → SHIPPED, списывает резерв и остаток, создаёт выручку/дебиторку и COGS/списание inventory; результат содержит revenue/cogs/grossProfit.
-6. `POST /orders/:id/payments` (`payments.write`) с `{amount:80000}`: только SHIPPED, без переплаты. Результат `{id,orderId,amount,outstanding}`; полная оплата → CLOSED. Проводка: дебет cash / кредит receivables.
+6. `POST /orders/:id/payments` (`payments.write`, `wallets.transact`) с `{walletId,amount:80000,businessDate:"2026-01-10"}`: SHIPPED/CLOSED, реальный денежный счёт. Дата до отгрузки учитывается как аванс до даты зачёта. Исправление оплаченной продажи может создать кредит клиента. Оплаты имеют версию, исправление, отмену/восстановление и историю; подробности GOODS.md.
 7. `POST /orders/:id/cancel` (`orders.write`): NEW/RESERVED → CANCELLED, освобождает резерв. Отгруженный заказ отменить таким способом нельзя.
 
-`GET /orders`, `GET /orders/:id` — право `orders.read`. Все суммы в одной валюте компании. В текущем этапе оплата отражается на общем счёте cash; выбор банковского/кассового кошелька ещё не реализован.
+`GET /orders`, `GET /orders/:id` — право `orders.read`. Все суммы в одной валюте компании. Новые оплаты проводятся через выбранный денежный счёт; наследованные записи cash требуют отдельной сверки.
 
 ## Учёт
 
@@ -67,10 +67,12 @@ POST: `{data:{name:"Товар"}}` → `{id,data,version:1,createdAt,updatedAt}`
 
 В строке строго одна положительная сторона, дебет=кредит, минимум две строки, максимум 100. Журнал редактируется специальным PUT с сохранением истории; обычный JSON CRUD финансовых регистров не используется. Коды счетов — строки до 64 символов, единый отраслевой план счетов ещё не валидируется.
 
-`GET /accounting/journal`, `GET /accounting/trial-balance?scope=ACCOUNTING` (`accounting.read`): список проводок / `{scope,accounts:[{account,debit,credit,balance}]}`. Для scope=BOTH отчёт показывает только записи BOTH; для ACCOUNTING/MANAGEMENT включает также BOTH. Ведомость пока за весь период, без отбора дат/подразделений.
+`GET /accounting/journal`, `GET /accounting/trial-balance?scope=ACCOUNTING` (`accounting.read`): список проводок / `{scope,accounts:[{account,debit,credit,balance}]}`. Для scope=BOTH отчёт показывает только записи BOTH; для ACCOUNTING/MANAGEMENT включает также BOTH. Ведомость поддерживает from/to и projectId, начальные остатки, обороты, конечные остатки и переход к проводкам.
 
 ## Файлы и аудит
 
 `POST /files` (`files.write`) — multipart с одним полем файла, максимум 10 MiB. Результат `{id,size}`. `GET /files/:id` (`files.read`) — байты как attachment, не публичный URL. Оригинальное имя — только метаданные, путь выбирает сервер. Удаление и антивирусная обработка пока отсутствуют.
 
 `GET /audit?after=0&limit=50` (`audit.read`) → `{items:[{sequence,company_id,actor_id,action,resource_id,created_at}]}`. Не включает пароли/токены. Это аудит прикладных изменений, не отдельная защищённая от администратора БД система журналирования.
+
+Начальные взаиморасчёты: [DEBTS.md](DEBTS.md). Сопоставление выписки и снятие ошибочной связи: [ACCESS_CASH.md](ACCESS_CASH.md).
