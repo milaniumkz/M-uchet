@@ -1,111 +1,35 @@
-# UchetSD
+# M-uchet
 
-Flutter/FlutterFlow приложение учета компаний с Firebase Hosting, Firestore, Storage и Cloud Functions.
+Исходный код Flutter-приложения и веб-интерфейса для дальнейшей разработки с отдельным backend. Основа: снимок main UchetSD от 6 октября 2026, commit `030efcf8c5adbcebb6348f1d5d8b155810f28ce5`. Исходный репозиторий не изменён.
 
-## Структура
+## Что сохранено
 
-- `lib/` — приложение Flutter, экраны, сервисы и кастомные виджеты.
-- `firebase/` — Firebase Hosting, Firestore rules/indexes, Storage rules, Cloud Functions.
-- `firebase/functions/` — backend функции Node.js 20.
-- `test/`, `integration_test/` — проверки.
-- `android/`, `ios/`, `macos/`, `web/` — платформенные проекты.
+- `lib/`: экраны, навигация, бизнес-логика, модели и текущие адаптеры данных.
+- `assets/`, `web/`, `android/`, `ios/`, `macos/`: ресурсы и платформенные оболочки.
+- `test/`, `integration_test/`: исходные проверки, которые потребуется адаптировать к новому backend.
 
-## Локальный запуск
+## Что удалено и отключено
 
-Требования:
+- Прежние Firebase project/client configuration, адреса рабочих сервисов и platform service-config файлы.
+- Каталог прежней серверной части `firebase/`, включая Cloud Functions, административные, seed/migration/deploy скрипты и правила базы.
+- GitHub Actions workflows, старые environment-подсказки и контактные примеры.
+- Инициализация Firebase и прежний вызов авторизации заменены блокирующими заглушками. Они не обращаются к прежнему серверу.
+- GitHub Actions в новом репозитории отключены. Деплой не выполнялся.
 
-- Flutter `3.35.6`
-- Dart `3.9.2`
-- Node.js `20`
-- Firebase CLI
+## Важное ограничение
 
-Команды:
+Это подготовленные исходники, а не готовая автономная система. Firebase SDK, типы, запросы и авторизационные адаптеры пока остаются во многих Dart-файлах: их замена новым API является отдельной работой. Запуск основного приложения намеренно останавливается на сообщении о неподключённом backend. Простое добавление адреса сервера не завершит миграцию.
 
-```bash
-flutter pub get
-flutter test
-flutter build web --release --no-wasm-dry-run
-```
+## Новый независимый сервер
 
-Cloud Functions:
+В [`server/`](server/README.md) добавлен Node.js 24 API без Firebase: сессии, права и изоляция компаний, справочники, файлы, FIFO-партии, резервирование/отгрузка/оплата заказов, двойная запись и аудит. Есть автоматические серверные тесты и инструкции локального запуска. Это первый этап разработки backend; недостающие процессы и подключение клиента перечислены в [карте миграции](server/docs/FRONTEND_BACKEND_GAPS.md). Flutter пока не подключён к этому API. Развёртывание на пользовательском сервере не выполнялось.
 
-```bash
-cd firebase/functions
-npm ci
-npm run lint
-```
+План подключения нового backend: [BACKEND_MIGRATION.md](BACKEND_MIGRATION.md). Модели данных сохранены в `lib/backend/schema/`.
 
-Локальные переменные описаны в `.env.example`. Реальные `.env`, service account JSON, ключи подписи и приватные сертификаты не коммитить.
+## Среда разработки и проверки
 
-## Firebase
+Исходный проект использует Flutter 3.35.6 / Dart 3.9.2. Внутреннее имя Dart-пакета `uchet_s_d` сохранено для совместимости импортов. Native bundle/application ID заменены на `com.example.muchet`; перед публикацией приложения задайте свои идентификаторы.
 
-Production проект: `uchet-9a732`.
+После установки подходящей среды и адаптации backend: `flutter pub get`, `flutter analyze`, `flutter test`, `flutter build web --release --no-wasm-dry-run`. Наличие этих команд не означает, что они прошли: при подготовке копии Flutter/Dart были недоступны, сборка и тесты не запускались. Выполнены статическая проверка структуры, удалённых конфигураций и сканирование импортируемых файлов.
 
-Основные URL:
-
-- Приложение: https://uchet-9a732.web.app
-- Админский hosting site: https://uchet-admin-9a732.web.app
-
-Ручной deploy с локальной машины:
-
-```bash
-flutter build web --release --no-wasm-dry-run
-rm -rf firebase/build/web
-mkdir -p firebase/build
-cp -R build/web firebase/build/web
-firebase deploy --only hosting --config firebase/firebase.json --project uchet-9a732
-```
-
-Полный deploy Firebase:
-
-```bash
-firebase deploy --only hosting,functions,firestore:rules,firestore:indexes,storage --config firebase/firebase.json --project uchet-9a732
-```
-
-## GitHub Actions
-
-Подготовлены workflow:
-
-- `CI` — запускается на pull request и push в `main`: Flutter tests/build и Functions lint.
-- `Deploy Firebase` — после push в `main` деплоит hosting, также доступен ручной запуск с выбором target.
-- `Firebase Ops` — ручные операции: статус проекта, список hosting channels, последние Functions logs.
-
-Для deploy нужен GitHub secret:
-
-- `FIREBASE_SERVICE_ACCOUNT_UCHET_9A732` — JSON service account с минимальными правами на Firebase Hosting/Functions/Firestore rules/indexes/Storage deploy.
-
-Production deploy защищен через GitHub Environment `production`. Включите required reviewers в настройках репозитория, если нужно ручное подтверждение.
-
-## Codex Cloud
-
-1. Откройте GitHub репозиторий проекта в Codex Cloud.
-2. Используйте ветки для задач, не работайте напрямую в `main`.
-3. Для обычной разработки используйте тестовый Firebase проект или отдельную тестовую конфигурацию, не production данные клиентов.
-4. После pull request проверьте GitHub Actions.
-5. После merge в `main` deploy запускается автоматически; ручной deploy доступен в Actions -> `Deploy Firebase`.
-
-## Данные и резервные копии
-
-Рабочие данные находятся в Firebase Firestore и Storage проекта `uchet-9a732`; они не хранятся в Git.
-
-Перед изменениями правил, функций или миграций базы:
-
-```bash
-firebase firestore:export gs://<backup-bucket>/<date-prefix> --project uchet-9a732
-```
-
-Пользовательские файлы Storage сохраняются отдельно в Firebase Storage. Не удаляйте buckets и production коллекции без отдельного согласования.
-
-## Откат
-
-- Hosting: Firebase Console -> Hosting -> нужный site -> Release history -> Roll back.
-- GitHub: Actions -> `Deploy Firebase` -> ручной запуск для проверенного коммита/ветки.
-- Functions: деплоить предыдущий совместимый коммит. Старую базу поверх новых пользовательских данных автоматически не восстанавливать.
-
-## Синхронизация локальной копии
-
-```bash
-git fetch origin
-git checkout main
-git pull --ff-only
-```
+Никакие учётные данные, пользователи, рабочие коллекции, файлы Storage, секреты GitHub или история исходного репозитория не переносились. Старые визуальные ресурсы и технические имена сохранены там, где они не являются подключением к сервису; ребрендинг не выполнялся.

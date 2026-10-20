@@ -1,0 +1,29 @@
+# Карта миграции Flutter → независимый backend
+
+Изучен импорт: 367 Dart-файлов в lib, 61 файл unit/widget-тестов, один integration test. Это статическая инвентаризация, не результат запуска Flutter.
+
+| Область клиента | Точки входа | Новый API / оставшаяся работа |
+|---|---|---|
+| Startup | `lib/main.dart`, `lib/backend/firebase/firebase_config.dart` | Сохранена блокировка initFirebase. Нужен новый bootstrap, конфигурация API и session state |
+| Авторизация | `lib/backend/api_requests/api_calls.dart`, `lib/auth/firebase_auth/` | Новый register/login/me/logout/password существует. TokenCall и все Firebase user streams надо заменить, права не брать из тела login |
+| Модели и запросы | `lib/backend/schema/`, `lib/backend/backend.dart`, `firestore_cache*` | Заменить DocumentReference/Query/Timestamp/streams на DTO и репозитории. Универсальный REST CRUD не совместим с Firestore SDK |
+| Права и компании | `utils/user_access_context.dart`, `company_membership_adapter.dart`, `role_assignment_support.dart`, `default_company_roles.dart` | Новый сервер использует membership на компанию, owner не является глобальным superadmin. Нужна явная таблица соответствия старых UI-permissions новым серверным правам |
+| Каталог и склады | `product_catalog_support.dart`, `warehouse_batch_support.dart`, `nomenclature_mutation_support.dart` | Справочники и FIFO-партии есть; прямые записи клиента заменить командами. Перемещения, корректировки, дробные единицы и WEIGHTED_AVERAGE ещё не реализованы |
+| Продажи и заказы | `sale_flow_support.dart`, `order_lifecycle_service.dart`, `order_lifecycle_support.dart` | NEW→RESERVED→SHIPPED→CLOSED и отмена до отгрузки есть. Нужны клиентские DTO и обработка Idempotency-Key. Частичные отгрузки, услуги и возвраты не перенесены |
+| Проводки и балансы | `accounting_entry_service.dart`, `account_balance_service.dart`, `transaction_sync.dart`, `ledger_scope.dart` | Журнал, контуры и ведомость есть; счета и кошельки клиента, налоги, аналитические измерения и сверка отчётов требуют отдельной реализации |
+| Долги | `debt_register_support.dart`, `debt_payment_history_support.dart` | Оплаты заказов и задолженность по ним есть. Общий реестр долгов, история взаимозачётов и займы ещё не перенесены |
+| Файлы | `lib/backend/firebase_storage/`, upload helpers | Приватный multipart API есть. Заменить Firebase URLs и download adapters; signed links пока отсутствуют |
+| Кассы и устройства | `cash_shift_support.dart`, `device_management_support.dart` | Метаданные устройств есть. Протокол команд, смены, инкассация, контроль касс не перенесены |
+| Аналитика | `analytics_service.dart`, `pnl_report_service.dart`, `balance_sheet_service.dart`, `report_export_service.dart` | Основные суммы доступны, полноценные отчёты/экспорт, даты и сравнение со старыми тестами ещё нужны |
+
+По статическому поиску обнаружено 80 различных имён Firestore-коллекций, включая вложенные `items`/`batches`. Это **не 80 готовых таблиц**: структуру вложенности и бизнес-инварианты нужно мигрировать осознанно. Старые `users`, `roles`, `security_*`, billing, admin_* и audit_1c_* не открываются универсальным JSON API. Реальные компании, пользователи и прежние данные отсутствуют и не переносились.
+
+## Очередь следующих этапов
+
+1. Утвердить contract DTO на auth/компании/каталог и заменить соответствующие Flutter-адаптеры вместе с тестами. Не снимать fail-closed bootstrap до рабочего сквозного сценария.
+2. Подключить приход→заказ→резерв→отгрузку→оплату, перенести денежные величины double в явные minor units, сопоставить контуры и единицы товара.
+3. Реализовать отсутствующие бизнес-процессы и перенести существующие проверки расчётов на клиент/сервер, где находится соответствующий инвариант.
+4. Получив параметры сервера, определить TLS/domain, ресурсы, PostgreSQL при необходимости, хранение файлов, backup, журналы, мониторинг и секреты. Проверить восстановление из полной копии и выполнить нагрузочный тест.
+5. Выполнить Flutter analyze/test/web build и end-to-end с новым API. Только после этого считать миграцию приложения завершённой.
+
+Продакшен-доступы и прежние Firebase-настройки для этих этапов не требуются. Код старого backend может помочь восстановить недокументированные правила, но не должен автоматически возвращать старые подключения.
