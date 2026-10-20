@@ -1,3 +1,4 @@
+import { registerTaxCalendarRoutes } from './tax-calendar.js';
 import { registerPayrollRoutes } from './payroll.js';
 import { projectOrderPayments } from './order-payments.js';
 import Fastify from 'fastify';
@@ -48,7 +49,9 @@ export async function createApp(options = {}) {
       if(['POST','PUT'].includes(route.method)&&!url.endsWith('/files'))documented.body={type:'object',additionalProperties:true,description:'See docs/API.md and server/README.md for required fields; typed request schemas are pending.'};
       return {schema:documented,url};
     } });
-  const registration = options.allowRegistration ?? process.env.ALLOW_REGISTRATION === 'true';
+  // Public account creation exists only in explicitly isolated test fixtures.
+  // A stale deployment variable must never open registration on an owner's server.
+  const registration = options.allowRegistration === true && process.env.APP_ENV === 'test' && /^test_[a-z0-9]+$/.test(db.schema);
   const dummyPassword = await hashPassword(newToken());
 
   app.setErrorHandler((error, request, reply) => {
@@ -494,6 +497,7 @@ export async function createApp(options = {}) {
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
   registerInvitationRoutes(app,{db,auth,owner,object});
+  registerTaxCalendarRoutes(app,{db,auth,access,command,object,pageLimit});
   registerPayrollRoutes(app,{db,auth,access,command,object,pageLimit});
   registerEmployeeRoutes(app,{db,auth,access,command,pageLimit,object});
   registerAssetRoutes(app,{db,auth,access,command,pageLimit,object});

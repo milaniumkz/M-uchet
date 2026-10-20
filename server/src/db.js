@@ -93,6 +93,9 @@ export async function openDatabase({ connectionString = process.env.DATABASE_URL
       if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=20').get()) {
         await db.exec(await readFile(new URL('../migrations/019_payroll.sql', import.meta.url), 'utf8'));
       }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=21').get()) {
+        await db.exec(await readFile(new URL('../migrations/020_tax_calendar.sql', import.meta.url), 'utf8'));
+      }
     });
     return db;
   } catch (error) { await pool.end(); throw error; }

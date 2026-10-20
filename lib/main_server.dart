@@ -1,3 +1,4 @@
+import 'workspace/tax_calendar_workspace.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/foundation.dart';
@@ -68,6 +69,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'assets': 'Активы',
     'employees': 'Сотрудники',
     'payroll': 'Зарплата',
+    'tax-calendar': 'Налоги',
     'access': 'Доступ',
     'reports': 'Отчёты',
     'journal': 'Бухгалтерские записи',
@@ -78,6 +80,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   };
   bool can(String permission) => company?.allows(permission) ?? true;
   bool visible(String key) => switch (key) {
+    'tax-calendar' => can('tax-calendar.read'),
     'access' => company?.role == 'owner',
     'help' => true,
     'projects' => can('projects.read') && can('reports.read'),
@@ -1006,6 +1009,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                       'assets' => Icons.computer_outlined,
                       'employees' => Icons.badge_outlined,
                       'payroll' => Icons.calculate_outlined,
+                      'tax-calendar' => Icons.event_note_outlined,
                       'access' => Icons.admin_panel_settings_outlined,
                       'help' => Icons.help_outline,
                       'journal' => Icons.menu_book_outlined,
@@ -1278,6 +1282,13 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           onChanged: refresh,
                           onEmployees: () =>
                               setState(() => section = 'employees'),
+                        )
+                      : section == 'tax-calendar'
+                      ? TaxCalendarWorkspace(
+                          key: ValueKey(company!.id),
+                          api: api,
+                          companyId: company!.id,
+                          onProfile: companySettings,
                         )
                       : section == 'employees'
                       ? EmployeesWorkspace(

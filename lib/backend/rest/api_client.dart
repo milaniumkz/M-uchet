@@ -13,7 +13,9 @@ class BackendException implements Exception {
   final String? requestId;
 
   String get message {
-    if(status==429){return 'Слишком частые запросы. Подождите немного и повторите действие.';}
+    if (status == 429) {
+      return 'Слишком частые запросы. Подождите немного и повторите действие.';
+    }
     const messages = {
       'insufficient_funds': 'Недостаточно средств на денежном счёте.',
       'insufficient_inventory': 'Недостаточно свободного остатка товара.',
@@ -117,6 +119,13 @@ class BackendException implements Exception {
       'invalid_depreciation_start':
           'Проверьте месяц начала и начисления амортизации.',
       'employee_identifier_conflict': 'Сотрудник с таким ИИН уже есть в фирме.',
+      'calendar_task_not_found': 'Задача не найдена в этой фирме.',
+      'calendar_date_confirmation_required':
+          'Подтвердите проверку даты и применимости срока.',
+      'invalid_calendar_task': 'Проверьте поля задачи и её статус.',
+      'invalid_preparation': 'Проверьте отметки подготовки.',
+      'company_profile_incomplete':
+          'Сначала заполните реквизиты и налоговый режим фирмы.',
       'invalid_employee_dates': 'Проверьте даты рождения, приёма и увольнения.',
       'invalid_employee_profile':
           'Проверьте статус, резидентство и код гражданства.',

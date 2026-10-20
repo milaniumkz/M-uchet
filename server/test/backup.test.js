@@ -73,6 +73,8 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const salaryRecord=await request('GET',prefix+`/payroll/${payroll.id}`,undefined,session.token);
  await request('PUT',prefix+`/payroll/${payroll.id}`,{version:salaryRecord.version,gross:20000000,reason:'SYNTHETIC PAYROLL RESTORE CORRECTION'},session.token,key());
  await request('POST',prefix+`/payroll/${payroll.id}/payments/${salaryPayment.id}/void`,{version:1},session.token,key());await request('POST',prefix+`/payroll/${payroll.id}/payments/${salaryPayment.id}/restore`,{version:2},session.token,key());
+ const taxTask=await request('POST',prefix+'/tax-calendar',{title:'SYNTHETIC RESTORE TASK',dueDate:'2026-01-26',status:'OPEN',category:'TAX',dueDateConfirmed:true,source:'SYNTHETIC CHECKED SOURCE'},session.token,key());
+ await request('PUT',prefix+'/tax-calendar/preparation/2026-01',{version:0,settingsVersion:1,profileChecked:true,documentsChecked:true,controlsChecked:false},session.token,key());
  await app.close();app=undefined;
  const dump=await open(join(directory,'backup.dump'),'wx',0o600);
  try{await docker(['pg_dump','-U','muchet','-d','muchet',`--schema=${schema}`,'--format=custom','--no-owner','--no-acl'],'ignore',dump.fd);}finally{await dump.close();}
@@ -101,5 +103,7 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const salaryCopy=(await restored.inject({url:prefix+`/payroll/${payroll.id}`,headers})).json();assert.equal(salaryCopy.data.calculation.net,17137500);assert.equal(salaryCopy.paid,1000000);assert.equal(salaryCopy.data.ruleSnapshot.version,'KZ_REGULAR_RESIDENT_PAYROLL_2026_V1');
  const salaryPayments=(await restored.inject({url:prefix+`/payroll/${payroll.id}/payments`,headers})).json().items;assert.equal(salaryPayments[0].version,3);assert.equal(salaryPayments[0].voided,false);
  assert.equal(wallets.find(w=>w.id===salaryWallet.id).balance,99000000);
+ const taxCopy=(await restored.inject({url:prefix+'/tax-calendar?from=2026-01-01&to=2026-01-31',headers})).json();assert.equal(taxCopy.items[0].id,taxTask.id);assert.equal(taxCopy.items[0].data.source,'SYNTHETIC CHECKED SOURCE');
+ const prepCopy=(await restored.inject({url:prefix+'/tax-calendar/preparation/2026-01',headers})).json();assert.equal(prepCopy.data.documentsChecked,true);assert.equal(prepCopy.ready,false);
  const file=await restored.inject({url:prefix+'/files/'+uploaded.id,headers});assert.equal(file.body,'SYNTHETIC RESTORE CONTENT');
 });

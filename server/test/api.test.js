@@ -221,7 +221,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 20);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 21);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -1132,4 +1132,69 @@ test('numeric KZ income, returns, costs and expenses reconcile across project an
  assert.equal(report.items.find(p=>p.projectId===project.id).netProfit,4000);
  const trial=(await f.api('GET','/accounting/trial-balance'+query)).body;
  assert.equal(trial.accounts.find(a=>a.account==='7210').balance,1500);
+});
+
+test('company tax tasks retain manually confirmed dates, idempotency and history without creating money',async t=>{
+ const f=await fixture(t),body={title:'Pay checked tax',dueDate:'2026-01-25',status:'OPEN',category:'TAX',notes:'SYNTHETIC NOTE',source:'Owner checked actual applicable deadline',dueDateConfirmed:true};
+ assert.equal((await f.api('POST','/tax-calendar',{...body,dueDateConfirmed:false})).status,422);
+ assert.equal((await f.api('POST','/tax-calendar',{...body,dueDate:'2026-02-30'})).status,400);
+ const key=randomUUID(),created=await f.api('POST','/tax-calendar',body,key);assert.equal(created.status,200,JSON.stringify(created.body));
+ assert.deepEqual((await f.api('POST','/tax-calendar',body,key)).body,created.body);
+ assert.equal((await f.api('POST','/tax-calendar',{...body,title:'Changed intent'},key)).status,409);
+ assert.equal((await f.api('POST','/periods/2026-01/close',{reason:'Reviewed'})).status,200);
+ const edit=await f.api('PUT','/tax-calendar/'+created.body.id,{...body,title:'Corrected task',dueDate:'2026-01-26',status:'DONE',version:1});assert.equal(edit.status,200);assert.equal(edit.body.version,2);
+ assert.equal((await f.api('PUT','/tax-calendar/'+created.body.id,{...body,version:1})).status,409);
+ const history=(await f.api('GET',`/tax-calendar/${created.body.id}/history`)).body.items;assert.equal(history.length,1);assert.equal(history[0].snapshot.due_date,'2026-01-25');
+ const report=(await f.api('GET','/tax-calendar?from=2026-01-01&to=2026-01-31')).body;assert.equal(report.items.length,1);assert.equal(report.counts.done,1);assert.equal(report.companyWide,true);assert.equal(report.automaticOfficialDeadlines,false);
+ assert.deepEqual((await f.api('GET','/accounting/journal')).body.items,[]);
+ const outsider=await f.user('tax-outsider@example.test');assert.equal((await f.call('GET',f.prefix+'/tax-calendar',null,outsider.token)).status,404);
+ const other=(await f.call('POST','/v1/companies',{name:'Other tax company',currency:'KZT'},outsider.token)).body;
+ assert.equal((await f.call('PUT',`/v1/companies/${other.id}/tax-calendar/${created.body.id}`,{...body,version:2},outsider.token,randomUUID())).status,404);
+ await f.app.db.prepare("INSERT INTO memberships(company_id,user_id,role,permissions) VALUES(?,?,'member',?)").run(f.company.id,outsider.id,JSON.stringify(['tax-calendar.read']));
+ assert.equal((await f.call('GET',f.prefix+'/tax-calendar',null,outsider.token)).status,200);
+ assert.equal((await f.call('PUT',f.prefix+'/tax-calendar/'+created.body.id,{...body,version:2},outsider.token,randomUUID())).status,403);
+ assert.equal((await f.call('GET',f.prefix+'/tax-calendar/preparation/2026-01',null,outsider.token)).status,403,'task readers do not implicitly gain company profile access');
+});
+
+test('tax preparation saves actual confirmations and invalidates profile approval after company settings change',async t=>{
+ const f=await fixture(t),path='/tax-calendar/preparation/2026-01';
+ const initial=(await f.api('GET',path)).body;assert.equal(initial.version,0);assert.equal(initial.ready,false);
+ const checks={version:0,settingsVersion:null,profileChecked:true,documentsChecked:true,controlsChecked:true};
+ assert.equal((await f.api('PUT',path,checks)).status,422);
+ const settings={version:0,legalName:'SYNTHETIC TAX PROFILE',identifier:'000000000000',legalForm:'TOO',taxRegime:'GENERAL',vatRegistered:false};
+ const profile=await f.api('PUT','/settings',settings);assert.equal(profile.status,200);
+ const saved=await f.api('PUT',path,{...checks,settingsVersion:1});assert.equal(saved.status,200);assert.equal(saved.body.ready,true);assert.equal(saved.body.officialReportGenerated,false);
+ assert.equal((await f.api('GET','/tax-calendar/preparation/2026-02')).body.ready,false);
+ assert.equal((await f.api('PUT',path,{...checks,settingsVersion:1})).status,409);
+ assert.equal((await f.api('PUT','/settings',{...settings,version:1,legalName:'UPDATED TAX PROFILE'})).status,200);
+ const changed=(await f.api('GET',path)).body;assert.equal(changed.profileCurrent,false);assert.equal(changed.ready,false);
+ assert.equal((await f.api('PUT',path,{...checks,version:1,settingsVersion:1})).status,409);
+ const confirmed=await f.api('PUT',path,{...checks,version:1,settingsVersion:2});assert.equal(confirmed.status,200);assert.equal(confirmed.body.ready,true);assert.equal(confirmed.body.version,2);
+ assert.equal((await f.api('GET','/tax-calendar/preparation/2026-13')).status,400);
+});
+
+test('calendar counts cover all filtered tasks while pagination and cancellation preserve records',async t=>{
+ const f=await fixture(t),create=async(title,dueDate,status='OPEN')=>{const r=await f.api('POST','/tax-calendar',{title,dueDate,status,category:'OTHER',dueDateConfirmed:true});assert.equal(r.status,200);return r.body;};
+ const old=await create('Overdue task','2000-01-01');await create('Done task','2000-01-02','DONE');await create('Future task','2099-01-01');
+ let r=(await f.api('GET','/tax-calendar?limit=1&from=2000-01-01&to=2000-01-31')).body;
+ assert.equal(r.items.length,1);assert.equal(r.counts.total,2);assert.equal(r.counts.overdue,1);assert.ok(r.nextCursor);
+ const next=(await f.api('GET',`/tax-calendar?limit=1&from=2000-01-01&to=2000-01-31&after=${r.nextCursor}`)).body;assert.equal(next.items.length,1);assert.notEqual(next.items[0].id,r.items[0].id);assert.deepEqual(next.counts,r.counts);
+ const cancel=await f.api('PUT','/tax-calendar/'+old.id,{title:old.title,dueDate:old.due_date,status:'CANCELLED',category:'OTHER',dueDateConfirmed:true,version:1});assert.equal(cancel.status,200);
+ r=(await f.api('GET','/tax-calendar?status=OPEN')).body;assert.equal(r.counts.total,1);assert.equal(r.counts.overdue,0);
+});
+
+test('production ignores registration flags and explicit test registration overrides',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'muchet-private-production-')),schema=testSchema();
+ let app;const previousEnv=process.env.APP_ENV,previousFlag=process.env.ALLOW_REGISTRATION;
+ try{
+  process.env.APP_ENV='production';process.env.ALLOW_REGISTRATION='true';
+  app=await createApp({dataDir:directory,schema,allowRegistration:true});
+ }finally{
+  if(previousEnv===undefined)delete process.env.APP_ENV;else process.env.APP_ENV=previousEnv;
+  if(previousFlag===undefined)delete process.env.ALLOW_REGISTRATION;else process.env.ALLOW_REGISTRATION=previousFlag;
+ }
+ t.after(async()=>{if(app){await app.db.exec(`DROP SCHEMA "${schema}" CASCADE`);await app.close();}await rm(directory,{recursive:true,force:true});});
+ const response=await app.inject({method:'POST',url:'/v1/auth/register',payload:{login:'uninvited@example.test',password:'SYNTHETIC PASSWORD',name:'Uninvited'}});
+ assert.equal(response.statusCode,403);assert.equal(response.json().error,'registration_disabled');
+ assert.equal((await app.db.prepare('SELECT count(*) AS n FROM users').get()).n,0);
 });

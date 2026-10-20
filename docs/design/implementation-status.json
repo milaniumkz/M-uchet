@@ -194,8 +194,10 @@
       "id": "D-22",
       "title": "Налоговый календарь",
       "platform": "desktop",
-      "status": "not_implemented",
-      "visual_parity_verified": false
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/tax_calendar_workspace.dart",
+      "implemented_scope": "Сохранение этапов подготовки с версией профиля, общие задачи фирмы с вручную подтверждёнными датами, статусы, календарь и история. Автоматические официальные сроки и декларации не реализованы."
     },
     {
       "id": "D-23",

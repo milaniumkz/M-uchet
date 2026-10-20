@@ -10,6 +10,8 @@ void main() {
   testWidgets(
     'an expired session in a nested workspace returns to login immediately',
     (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 960));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       final api = BackendClient(
         origin: Uri.parse('https://api.example.test'),
         transport: MockClient((request) async {
@@ -73,12 +75,22 @@ void main() {
       expect(find.text('Бизнес под контролем'), findsOneWidget);
       await tester.tap(find.text('Проекты'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Доступ').last);
+      await tester.scrollUntilVisible(
+        find.text('Доступ'),
+        100,
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Доступ').last);
       await tester.pumpAndSettle();
       expect(api.authenticated, isFalse);
-      expect(find.text('Вход в М-Учёт'), findsOneWidget);
+      expect(find.text('Войти'), findsOneWidget);
+      expect(find.byType(TextField), findsNWidgets(2));
       expect(find.text('Бизнес под контролем'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
