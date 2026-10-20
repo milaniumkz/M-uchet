@@ -221,7 +221,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 18);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 19);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -937,4 +937,72 @@ test('counterparty service statement reconciles advances, recognition, correctio
  assert.equal((await f.api('GET',path+'?scope=BOTH')).status,400);
  const other=await f.user('statement-other@example.test');assert.equal((await f.call('GET',f.prefix+path,undefined,other.token)).status,404);
  const list=await f.api('GET','/commercial-documents?counterpartyId='+f.supplier.id);assert.equal(list.body.summary.count,0);
+});
+
+test('dated goods payments use real wallets and reclassify advances after closed-period project and date corrections',async t=>{
+ const f=await fixture(t),refs=await f.catalog();
+ await f.api('POST','/inventory/receipts',{...refs,quantity:10,unitCost:100,businessDate:'2026-01-01'});
+ const wallet=(await f.api('POST','/wallets',{name:'GOODS BANK'})).body;
+ const a=(await f.api('POST','/projects',{name:'Goods A'})).body,b=(await f.api('POST','/projects',{name:'Goods B'})).body;
+ const order=(await f.api('POST','/orders',{businessDate:'2026-01-10',projectId:a.id,items:[{...refs,quantity:4,unitPrice:200}]})).body;
+ await f.api('POST',`/orders/${order.id}/reserve`,{});assert.equal((await f.api('POST',`/orders/${order.id}/ship`,{})).status,200);
+ const key=randomUUID(),payment=await f.api('POST',`/orders/${order.id}/payments`,{amount:800,walletId:wallet.id,businessDate:'2026-01-05'},key);assert.equal(payment.status,200);
+ assert.deepEqual((await f.api('POST',`/orders/${order.id}/payments`,{amount:800,walletId:wallet.id,businessDate:'2026-01-05'},key)).body,payment.body);
+ let trial=(await f.api('GET','/accounting/trial-balance?to=2026-01-09')).body.accounts;
+ assert.equal(trial.find(a=>a.account==='customer_advances').balance,-800);assert.equal(trial.find(a=>a.account==='receivables')?.balance??0,0);
+ trial=(await f.api('GET','/accounting/trial-balance?to=2026-01-10')).body.accounts;assert.equal(trial.find(a=>a.account==='customer_advances').balance,0);assert.equal(trial.find(a=>a.account==='receivables').balance,0);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,800);
+ await f.api('POST','/periods/2026-01/close',{});
+ const revised=await f.api('PUT',`/orders/${order.id}`,{expectedRevision:0,projectId:b.id,businessDate:'2026-01-20',items:[{...refs,quantity:3,unitPrice:200}],reason:'SYNTHETIC GOODS CORRECTION'});assert.equal(revised.status,200);assert.equal(revised.body.customerCredit,200);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,800);
+ assert.equal((await f.api('GET',`/reports/projects?projectId=${a.id}`)).body.items[0].netProfit,0);assert.equal((await f.api('GET',`/reports/projects?projectId=${b.id}`)).body.items[0].netProfit,300);
+ assert.equal((await f.api('GET','/reports/profit-loss?from=2026-01-10&to=2026-01-19')).body.revenue,0);
+ trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;assert.equal(trial.find(a=>a.account==='cash')?.balance??0,0);assert.equal(trial.find(a=>a.account==='customer_advances').balance,-200);assert.equal(trial.find(a=>a.account==='receivables').balance,0);
+ const details=(await f.api('GET',`/orders/${order.id}`)).body;assert.equal(details.paid,800);assert.equal(details.customerCredit,200);assert.equal(details.revision,1);
+ const records=(await f.api('GET',`/wallets/${wallet.id}/entries`)).body.items;assert.equal(records.length,1);assert.equal(records[0].amount,800);assert.equal(records[0].project_id,b.id);
+ assert.equal((await f.api('GET',`/orders/${order.id}/payments`)).body.items[0].business_date,'2026-01-05');
+ assert.equal((await f.api('PUT',`/orders/${order.id}`,{expectedRevision:0,items:[{...refs,quantity:2,unitPrice:200}]})).status,409);
+ assert.equal((await f.api('PUT',`/orders/${order.id}`,{scope:'MANAGEMENT',items:[{...refs,quantity:3,unitPrice:200}]})).status,400);
+ assert.equal((await f.api('GET',`/orders/${order.id}`)).body.revision,1);
+});
+
+test('goods VAT uses exact per-line rounding and corrections split revenue and VAT without changing paid cash',async t=>{
+ const f=await commercialFixture(t,{vat:true}),refs=await f.catalog();
+ const other=(await f.api('POST','/resources/nomenklatura',{data:{name:'Second product'}})).body;
+ await f.api('POST','/inventory/receipts',{...refs,quantity:10,unitCost:10,businessDate:'2026-01-01'});
+ await f.api('POST','/inventory/receipts',{...refs,productId:other.id,quantity:10,unitCost:10,businessDate:'2026-01-01'});
+ const input={counterpartyId:f.client.id,projectId:f.project.id,businessDate:'2026-01-10',vatBasisPoints:1600,items:[{...refs,quantity:3,unitPrice:101},{...refs,productId:other.id,quantity:1,unitPrice:101}]};
+ const created=await f.api('POST','/orders',input);assert.equal(created.status,200);assert.equal(created.body.number,'ТН-2026-0001');assert.equal(created.body.net,404);assert.equal(created.body.vat,64);assert.equal(created.body.total,468);assert.equal(created.body.counterparty.name,'SYNTHETIC CLIENT');
+ const id=created.body.id;await f.api('POST',`/orders/${id}/reserve`,{});await f.api('POST',`/orders/${id}/ship`,{});await f.api('POST',`/orders/${id}/payments`,{amount:468,walletId:f.wallet.id,businessDate:'2026-01-11'});
+ const edited=await f.api('PUT',`/orders/${id}`,{...input,items:[{...refs,quantity:3,unitPrice:102},{...refs,productId:other.id,quantity:1,unitPrice:101}]});assert.equal(edited.status,200);assert.equal(edited.body.number,created.body.number);assert.equal(edited.body.total,472);assert.equal(edited.body.vat,65);assert.equal(edited.body.status,'SHIPPED');
+ const trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;assert.equal(trial.find(a=>a.account==='revenue').balance,-407);assert.equal(trial.find(a=>a.account==='vat_payable').balance,-65);assert.equal(trial.find(a=>a.account==='receivables').balance,4);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,468);
+ assert.equal((await f.api('POST','/orders',{...input,vatBasisPoints:0})).status,422);
+ assert.equal((await f.api('POST','/orders',{...input,businessDate:'2025-12-31'})).status,422);
+});
+
+test('goods payment correction, void and restore preserve actual wallets, advance dates and audit versions',async t=>{
+ const f=await fixture(t),refs=await f.catalog();await f.api('POST','/inventory/receipts',{...refs,quantity:10,unitCost:100});
+ const a=(await f.api('POST','/wallets',{name:'Goods bank A'})).body,b=(await f.api('POST','/wallets',{name:'Goods bank B'})).body;
+ const order=(await f.api('POST','/orders',{businessDate:'2026-01-10',items:[{...refs,quantity:4,unitPrice:200}]})).body;
+ await f.api('POST',`/orders/${order.id}/reserve`,{});await f.api('POST',`/orders/${order.id}/ship`,{});
+ const payment=(await f.api('POST',`/orders/${order.id}/payments`,{walletId:a.id,amount:800,businessDate:'2026-01-11'})).body;
+ const path=`/orders/${order.id}/payments/${payment.id}`;
+ await f.api('POST',`/wallets/${a.id}/transactions`,{type:'EXPENSE',amount:200,description:'Already spent'});
+ const correction={version:1,walletId:b.id,amount:600,businessDate:'2026-01-05',reason:'SYNTHETIC GOODS PAYMENT EDIT'};
+ assert.equal((await f.api('PUT',path,correction)).status,409,'moving spent cash must roll back both wallet registers');
+ assert.equal((await f.api('GET',`/orders/${order.id}/payments`)).body.items[0].version,1);
+ await f.api('POST',`/wallets/${a.id}/transactions`,{type:'CAPITAL',amount:200,description:'Funds replacing spent cash'});
+ const edited=await f.api('PUT',path,correction);assert.equal(edited.status,200);assert.equal(edited.body.version,2);assert.equal(edited.body.outstanding,200);
+ let wallets=(await f.api('GET','/wallets')).body.items;assert.equal(wallets.find(w=>w.id===a.id).balance,0);assert.equal(wallets.find(w=>w.id===b.id).balance,600);
+ let trial=(await f.api('GET','/accounting/trial-balance?to=2026-01-09')).body.accounts;assert.equal(trial.find(a=>a.account==='customer_advances').balance,-600);
+ assert.equal((await f.api('POST',path+'/void',{version:2})).status,200);assert.equal((await f.api('GET',`/orders/${order.id}`)).body.paid,0);assert.equal((await f.api('GET','/wallets')).body.items.find(w=>w.id===b.id).balance,0);
+ assert.equal((await f.api('POST',path+'/restore',{version:3})).status,200);assert.equal((await f.api('GET',`/orders/${order.id}`)).body.paid,600);
+ const overpaid=await f.api('PUT',path,{...correction,version:4,amount:1000});assert.equal(overpaid.status,200);assert.equal(overpaid.body.customerCredit,200);
+ trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;assert.equal(trial.find(a=>a.account==='receivables').balance,0);assert.equal(trial.find(a=>a.account==='customer_advances').balance,-200);
+ assert.equal((await f.api('GET','/wallets')).body.items.find(w=>w.id===b.id).balance,1000);
+ const entry=(await f.api('GET',`/wallets/${b.id}/entries`)).body.items.find(e=>e.kind==='ORDER_PAYMENT');
+ const journal=(await f.api('GET',`/accounting/journal/${entry.journal_id}`)).body;assert.equal(journal.sourceOrderId,order.id);
+ assert.equal((await f.api('PUT',`/accounting/journal/${entry.journal_id}`,{lines:[{account:'cash',debit:1},{account:'capital',credit:1}]})).status,409);
+ assert.equal((await f.api('PUT',path,{...correction,version:1})).status,409);
 });

@@ -21,6 +21,7 @@ import 'workspace/money_transaction_dialog.dart';
 import 'workspace/cash_workspace.dart';
 import 'workspace/account_dialog.dart';
 import 'workspace/help_workspace.dart';
+import 'workspace/goods_workspace.dart';
 import 'workspace/commercial_repository.dart' show moneyText;
 
 void main() => runApp(const AccountingWorkspace());
@@ -58,6 +59,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   final sections = const {
     'projects': 'Проекты',
     'sales': 'Продажи',
+    'goods': 'Товарные продажи',
     'purchases': 'Покупки',
     'bank': 'Деньги',
     'cash': 'Касса',
@@ -78,6 +80,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'help' => true,
     'projects' => can('projects.read') && can('reports.read'),
     'sales' || 'purchases' => can('documents.read'),
+    'goods' => can('orders.read') && can('catalog.read'),
     'bank' => can('bank.read') && can('wallets.read'),
     'cash' => can('wallets.read'),
     'inventory' => can('inventory.read') && can('catalog.read'),
@@ -997,6 +1000,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                     leading: Icon(switch (entry.key) {
                       'projects' => Icons.folder_outlined,
                       'sales' => Icons.receipt_long_outlined,
+                      'goods' => Icons.local_shipping_outlined,
                       'purchases' => Icons.shopping_bag_outlined,
                       'bank' => Icons.account_balance_wallet_outlined,
                       'cash' => Icons.payments_outlined,
@@ -1124,6 +1128,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                       if ([
                         'sales',
                         'purchases',
+                        'goods',
                         'employees',
                         'reports',
                         'journal',
@@ -1168,6 +1173,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                       if ([
                         'sales',
                         'purchases',
+                        'goods',
                         'reports',
                         'journal',
                       ].contains(section))
@@ -1216,6 +1222,20 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           companyId: company!.id,
                           currency: company!.currency,
                           direction: section,
+                          projects: projects,
+                          projectId: selected,
+                          from: period == null ? null : date(period!.start),
+                          to: period == null ? null : date(period!.end),
+                          onChanged: refresh,
+                        )
+                      : section == 'goods'
+                      ? GoodsWorkspace(
+                          key: ValueKey(
+                            '${company!.id}:goods:$selected:$period',
+                          ),
+                          api: api,
+                          companyId: company!.id,
+                          currency: company!.currency,
                           projects: projects,
                           projectId: selected,
                           from: period == null ? null : date(period!.start),

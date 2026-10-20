@@ -17,7 +17,7 @@ make backup-test
 
 `make seed-dev` работает только при APP_ENV=development; создаёт явно синтетического владельца и компанию. Случайный тестовый пароль сохраняется с правами 0600 в игнорируемом `.runtime/synthetic-login.json`, не выводится в консоль и не попадает в Git. Повторный seed сохраняет существующие реквизиты. Это не production bootstrap. Публичная регистрация по умолчанию выключена.
 
-`GET /health` проверяет запрос БД и возвращает status=ok/schemaVersion=18. `GET /openapi.json` описывает зарегистрированные маршруты; экспорт: `cd server && npm run openapi`. Схемы тел OpenAPI пока неполны; детальное описание исходного API: [docs/API.md](docs/API.md), расширения перечислены ниже. Не генерируйте production-клиент из неполных схем.
+`GET /health` проверяет запрос БД и возвращает status=ok/schemaVersion=19. `GET /openapi.json` описывает зарегистрированные маршруты; экспорт: `cd server && npm run openapi`. Схемы тел OpenAPI пока неполны; детальное описание исходного API: [docs/API.md](docs/API.md), расширения перечислены ниже. Не генерируйте production-клиент из неполных схем.
 
 ## Реальные возможности
 
@@ -151,3 +151,5 @@ npm run issue-recovery -- --login user@example.test --output /secure/path/recove
 Проверено:51серверный тест,9живых Dart→API/PostgreSQL сценариев,323Flutter-теста, Web release и Android debug. В живых сценариях проверены склад и реестры на mobile390×844, редактирование сумм в закрытом месяце и восстановление пароля. Для выборочного живого прогона: `cd server && APP_ENV=test node --env-file=../.env scripts/client-e2e.mjs test_live/assets_workspace_test.dart`.
 
 Доступ сотрудников, касса и сопоставление уже внесённых банковских операций: [ACCESS_CASH.md](docs/ACCESS_CASH.md).
+
+Товарные продажи, FIFO-отгрузка, оплаты, исправления и внутренняя накладная: [GOODS.md](docs/GOODS.md).

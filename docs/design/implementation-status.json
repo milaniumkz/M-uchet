@@ -79,8 +79,10 @@
       "id": "D-09",
       "title": "Накладная № 014",
       "platform": "desktop",
-      "status": "not_implemented",
-      "visual_parity_verified": false
+      "status": "partial",
+      "visual_parity_verified": false,
+      "source": "lib/workspace/goods_workspace.dart",
+      "implemented_scope": "Товарная продажа, проверка серверных сумм/НДС, резерв, отгрузка FIFO, отмена и восстановление черновика, оплата на счёт, редактирование оплат/продажи, история и внутренний PDF; утверждённая З-2 и точная компоновка ещё не выполнены"
     },
     {
       "id": "D-10",

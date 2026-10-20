@@ -12,12 +12,13 @@ import 'commercial_detail.dart';
 import 'input_dialogs.dart';
 import 'assets_workspace.dart';
 import 'cash_workspace.dart';
+import 'goods_workspace.dart';
 
 const ledgerLabels = {
-  'fixed_assets':'Основные средства',
-  'accumulated_depreciation':'Накопленная амортизация',
-  'depreciation':'Амортизационные расходы',
-  'asset_disposal_loss':'Списание основных средств',
+  'fixed_assets': 'Основные средства',
+  'accumulated_depreciation': 'Накопленная амортизация',
+  'depreciation': 'Амортизационные расходы',
+  'asset_disposal_loss': 'Списание основных средств',
   'cash': 'Денежные средства',
   'capital': 'Капитал',
   'revenue': 'Доходы',
@@ -30,6 +31,7 @@ const ledgerLabels = {
   'supplier_advances': 'Авансы поставщикам',
   'vat_payable': 'НДС к уплате',
   'input_vat_pending': 'Входящий НДС на проверке',
+  'pending_input_vat': 'Входящий НДС на проверке',
   'inventory_loss': 'Списания запасов',
 };
 String accountName(String account) =>
@@ -171,11 +173,37 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
       if (!mounted) {
         return;
       }
-      if(details['sourceTransferId']!=null&&hasCompanyPermission(context,'wallets.read')){
-        await showWalletTransfer(context,api:widget.api,companyId:widget.companyId,currency:widget.currency,transferId:details['sourceTransferId'] as String);
-      }else if(details['sourceAssetId']!=null){
-        await showAssetDetails(context,api:widget.api,companyId:widget.companyId,assetId:details['sourceAssetId'] as String,currency:widget.currency,projects:widget.projects,onChanged:widget.onChanged);
-      }else if (details['sourceDocumentId'] != null) {
+      if (details['sourceTransferId'] != null &&
+          hasCompanyPermission(context, 'wallets.read')) {
+        await showWalletTransfer(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          currency: widget.currency,
+          transferId: details['sourceTransferId'] as String,
+        );
+      } else if (details['sourceOrderId'] != null &&
+          hasCompanyPermission(context, 'orders.read')) {
+        await showGoodsOrder(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          orderId: details['sourceOrderId'] as String,
+          currency: widget.currency,
+          projects: widget.projects,
+          onChanged: widget.onChanged,
+        );
+      } else if (details['sourceAssetId'] != null) {
+        await showAssetDetails(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          assetId: details['sourceAssetId'] as String,
+          currency: widget.currency,
+          projects: widget.projects,
+          onChanged: widget.onChanged,
+        );
+      } else if (details['sourceDocumentId'] != null) {
         final doc = await CommercialRepository(
           widget.api,
           widget.companyId,
@@ -343,7 +371,9 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
   Future<void> markPeriod() async {
     final result = await showDialog<Map<String, String>>(
       context: context,
-      builder: (_) => PeriodStatusDialog(allowClose:hasCompanyPermission(context,'periods.close'),allowOpen:hasCompanyPermission(context,'periods.reopen'),
+      builder: (_) => PeriodStatusDialog(
+        allowClose: hasCompanyPermission(context, 'periods.close'),
+        allowOpen: hasCompanyPermission(context, 'periods.reopen'),
         month: (widget.from ?? DateTime.now().toIso8601String()).substring(
           0,
           7,
@@ -417,13 +447,22 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
           }, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
           if (widget.mode == 'journal')
             FilledButton.icon(
-              onPressed: busy||!hasCompanyPermission(context,'accounting.post') ? null : create,
+              onPressed:
+                  busy || !hasCompanyPermission(context, 'accounting.post')
+                  ? null
+                  : create,
               icon: const Icon(Icons.add),
               label: const Text('Новая запись'),
             ),
           if (widget.mode == 'periods')
             FilledButton(
-              onPressed: busy || pending != null || (!hasCompanyPermission(context,'periods.close')&&!hasCompanyPermission(context,'periods.reopen')) ? null : markPeriod,
+              onPressed:
+                  busy ||
+                      pending != null ||
+                      (!hasCompanyPermission(context, 'periods.close') &&
+                          !hasCompanyPermission(context, 'periods.reopen'))
+                  ? null
+                  : markPeriod,
               child: const Text('Изменить состояние месяца'),
             ),
           if (widget.mode != 'periods')

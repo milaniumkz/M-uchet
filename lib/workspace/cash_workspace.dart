@@ -5,6 +5,7 @@ import 'commercial_repository.dart';
 import 'company_access.dart';
 import 'money_transaction_dialog.dart';
 import 'journal_editor.dart';
+import 'goods_workspace.dart';
 
 const cashKinds = {
   'INCOME': 'Поступление',
@@ -19,6 +20,9 @@ const cashKinds = {
   'PAYMENT_VOID': 'Отмена записи оплаты',
   'PAYMENT_RESTORE': 'Восстановление записи оплаты',
   'DEBT_PAYMENT': 'Погашение задолженности',
+  'ORDER_PAYMENT': 'Оплата товаров',
+  'ORDER_PAYMENT_VOID': 'Отмена записи оплаты товаров',
+  'ORDER_PAYMENT_RESTORE': 'Восстановление записи оплаты товаров',
 };
 Future<void> showWalletTransfer(
   BuildContext context, {
@@ -299,15 +303,28 @@ class _CashWorkspaceState extends State<CashWorkspace> {
       if (!mounted) {
         return;
       }
-      await showDialog<bool>(
-        context: context,
-        builder: (_) => JournalEditor(
+      if (data['sourceOrderId'] != null &&
+          hasCompanyPermission(context, 'orders.read')) {
+        await showGoodsOrder(
+          context,
           api: widget.api,
           companyId: widget.companyId,
+          orderId: data['sourceOrderId'] as String,
+          currency: widget.currency,
           projects: widget.projects,
-          entry: data,
-        ),
-      );
+          onChanged: widget.onChanged,
+        );
+      } else {
+        await showDialog<bool>(
+          context: context,
+          builder: (_) => JournalEditor(
+            api: widget.api,
+            companyId: widget.companyId,
+            projects: widget.projects,
+            entry: data,
+          ),
+        );
+      }
       if (mounted) {
         await changed();
       }

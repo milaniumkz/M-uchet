@@ -16,7 +16,8 @@
       "basis": "Прочитаны указанные статьи и официальная info-страница. Стандартная ставка НДС 16% с исключениями; база СНР 4%, местные корректировки до ±50%; предел допуска 600000 МРП. Исключения/местные решения и все условия расчёта ещё не полностью проверены; продуктивный налоговый расчёт не включён.",
       "related_features": [
         "commercial_document_explicit_standard_vat_2026",
-        "invoice_advance_and_service_recognition"
+        "invoice_advance_and_service_recognition",
+        "goods_document_explicit_standard_vat_2026"
       ],
       "technical_implementation": "partial_document_rules_only",
       "official_schema_verified": false,

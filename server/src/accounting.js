@@ -74,8 +74,23 @@ export async function allocate(db, companyId, line, ledgerScope) {
   return allocations;
 }
 
-export async function orderInput(db, companyId, body) {
-  const ledgerScope = scope(body.scope);
+export async function orderInput(db, companyId, body, timezone='Asia/Almaty', previous) {
+  const ledgerScope = scope(body.scope),date=businessDate(body.businessDate,timezone);
+  const issuer=await db.prepare('SELECT * FROM company_settings WHERE company_id=?').get(companyId);
+  const vatBasisPoints=integer(body.vatBasisPoints??previous?.vatBasisPoints??0,'vatBasisPoints');
+  if(![0,1600].includes(vatBasisPoints))fail(422,'unsupported_vat_rate');
+  if(vatBasisPoints&&(date<'2026-01-01'||date>'2026-12-31'))fail(422,'vat_rule_version_unavailable');
+  if(vatBasisPoints&&!issuer?.vat_registered)fail(422,'vat_registration_required');
+  const vatReason=body.vatReason??previous?.vatReason??'';
+  if(typeof vatReason!=='string'||vatReason.length>1000)fail(400,'invalid_vat_reason');
+  if(!vatBasisPoints&&issuer?.vat_registered&&!vatReason.trim())fail(422,'vat_reason_required');
+  let counterpartyId=body.counterpartyId??null,counterparty=null;
+  if(counterpartyId){
+    counterpartyId=text(counterpartyId,'counterpartyId');
+    const party=await db.prepare("SELECT data FROM documents WHERE company_id=? AND kind='clients' AND id=?").get(companyId,text(counterpartyId,'counterpartyId'));
+    if(!party)fail(404,'counterparty_not_found');
+    counterparty=previous?.counterpartyId===counterpartyId&&body.refreshCounterparty!==true?previous.counterparty:JSON.parse(party.data);
+  }
   if (!Array.isArray(body.items) || !body.items.length || body.items.length > 100) fail(400, 'invalid_items');
   const seen = new Set();
   const items = [];
@@ -88,9 +103,13 @@ export async function orderInput(db, companyId, body) {
     const key = `${productId}:${warehouseId}`;
     if (seen.has(key)) fail(400, 'duplicate_order_line');
     seen.add(key);
-    items.push({ productId, warehouseId, quantity: integer(item.quantity, 'quantity', 1), unitPrice: integer(item.unitPrice, 'unitPrice') });
+    const product=await db.prepare("SELECT data FROM documents WHERE company_id=? AND kind='nomenklatura' AND id=?").get(companyId,productId),warehouse=await db.prepare("SELECT data FROM documents WHERE company_id=? AND kind='warehouses' AND id=?").get(companyId,warehouseId);
+    const old=previous?.items.find(l=>l.productId===productId&&l.warehouseId===warehouseId);
+    const quantity=integer(item.quantity,'quantity',1),unitPrice=integer(item.unitPrice,'unitPrice'),net=integer(quantity*unitPrice,'line_amount'),vat=Number((BigInt(net)*BigInt(vatBasisPoints)+5000n)/10000n);
+    integer(net+vat,'line_total');
+    items.push({ productId,warehouseId,quantity,unitPrice,net,vat,total:net+vat,productName:old?.productName&&body.refreshCatalog!==true?old.productName:JSON.parse(product.data).name??'Товар',warehouseName:old?.warehouseName&&body.refreshCatalog!==true?old.warehouseName:JSON.parse(warehouse.data).name??'Склад' });
   }
-  const total = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const net=items.reduce((sum,item)=>sum+item.net,0),vat=items.reduce((sum,item)=>sum+item.vat,0),total=net+vat;
   integer(total, 'order_total');
-  return { scope: ledgerScope, projectId: await projectReference(db, companyId, body.projectId), items, total };
+  return {number:previous?.number??null,scope:ledgerScope,businessDate:date,projectId:await projectReference(db,companyId,body.projectId),counterpartyId,counterparty,issuer:previous?.issuer??issuer,vatBasisPoints,vatReason:vatReason.trim(),net,vat,total,items,note:body.note===undefined?'':body.note===''?'':text(body.note,'note',2000) };
 }

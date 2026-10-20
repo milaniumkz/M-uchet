@@ -1,3 +1,4 @@
+import { projectOrderPayments } from './order-payments.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import staticFiles from '@fastify/static';
@@ -10,7 +11,7 @@ import { writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { openDatabase, transaction } from './db.js';
 import { hashPassword, verifyPassword, newToken, hashToken, fail, text, integer, scope, businessDate } from './security.js';
-import { postJournal, allocate, orderInput, projectReference, registerManualWalletEntries } from './accounting.js';
+import { postJournal, allocate, orderInput, projectReference, syncWalletBalances, registerManualWalletEntries } from './accounting.js';
 import { kinds, permissions } from './resources.js';
 import { registerCommercialRoutes } from './commercial.js';
 import { registerInvitationRoutes } from './invitations.js';
@@ -268,8 +269,9 @@ export async function createApp(options = {}) {
 
   app.post('/v1/companies/:companyId/inventory/receipts', { preHandler: auth }, async request => (await command(request, 'inventory.receive', 'inventory.receive', async company => {
     const body = object(request.body);
-    const parsed = (await orderInput(db, company.id, { scope: body.scope, projectId:body.projectId, items: [{ ...body, unitPrice: 0 }] }));
-    const item = parsed.items[0], unitCost = integer(body.unitCost, 'unitCost');
+    const parsed={scope:scope(body.scope),projectId:await projectReference(db,company.id,body.projectId)};
+    const item={productId:text(body.productId,'productId'),warehouseId:text(body.warehouseId,'warehouseId'),quantity:integer(body.quantity,'quantity',1)},unitCost=integer(body.unitCost,'unitCost');
+    for(const [kind,id]of [['nomenklatura',item.productId],['warehouses',item.warehouseId]])if(!await db.prepare('SELECT 1 FROM documents WHERE company_id=? AND kind=? AND id=?').get(company.id,kind,id))fail(404,'catalog_reference_not_found');
     integer(item.quantity * unitCost, 'inventory_value');
     const id = randomUUID();
     (await db.prepare('INSERT INTO batches(id,company_id,product_id,warehouse_id,scope,quantity,reserved,unit_cost,created_at) VALUES(?,?,?,?,?,?,0,?,?)').run(id, company.id, item.productId, item.warehouseId, parsed.scope, item.quantity, unitCost, now()));
@@ -282,8 +284,16 @@ export async function createApp(options = {}) {
     const items=await db.prepare('SELECT * FROM batches WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId,request.query.after??'',pageLimit(request.query));
     return {items,nextCursor:items.length===pageLimit(request.query)?items.at(-1).id:null};
   });
+  app.post('/v1/companies/:companyId/orders/preview',{preHandler:auth},async request=>{
+    const body=object(request.body),company=await access(request,body.orderId?'orders.edit':'orders.write');
+    let previous;
+    if(body.orderId){await access(request,'orders.edit');const row=await db.prepare('SELECT data FROM orders WHERE company_id=? AND id=?').get(company.id,text(body.orderId,'orderId'));if(!row)fail(404,'order_not_found');previous=JSON.parse(row.data);}
+    return orderInput(db,company.id,body,company.timezone,previous);
+  });
   app.post('/v1/companies/:companyId/orders', { preHandler: auth }, async request => (await command(request, 'orders.write', 'order.create', async company => {
-    const parsed = (await orderInput(db, company.id, object(request.body)));
+    const parsed = (await orderInput(db, company.id, object(request.body),company.timezone));
+    const year=Number(parsed.businessDate.substring(0,4)),sequence=(await db.prepare("INSERT INTO document_sequences(company_id,kind,year,next_number) VALUES(?,'GOODS_ORDER',?,2) ON CONFLICT(company_id,kind,year) DO UPDATE SET next_number=document_sequences.next_number+1 RETURNING next_number-1 AS number").get(company.id,year)).number;
+    parsed.number=`ТН-${year}-${String(sequence).padStart(4,'0')}`;
     const id = randomUUID();
     (await db.prepare("INSERT INTO orders VALUES(?,?,'NEW',?,?)").run(id, company.id, JSON.stringify(parsed), now()));
     return { id, status: 'NEW', ...parsed };
@@ -291,16 +301,23 @@ export async function createApp(options = {}) {
   const getOrder = async (companyId, id) => {
     const row = (await db.prepare('SELECT * FROM orders WHERE company_id=? AND id=?').get(companyId, id));
     if (!row) fail(404, 'order_not_found');
-    return { ...row, data: JSON.parse(row.data) };
+    const paid=(await db.prepare('SELECT COALESCE(sum(amount),0) AS paid FROM payments WHERE company_id=? AND order_id=? AND NOT voided').get(companyId,id)).paid;
+    const data=JSON.parse(row.data);
+    return { ...row,data,paid,outstanding:Math.max(0,data.total-paid),customerCredit:Math.max(0,paid-data.total),revision:(await db.prepare("SELECT count(*) AS n FROM entity_history WHERE company_id=? AND kind='order' AND entity_id=?").get(companyId,id)).n };
   };
   app.get('/v1/companies/:companyId/orders', { preHandler: auth }, async request => {
-    (await access(request, 'orders.read'));
-    const selected=request.query.projectId;
-    if(selected!==undefined && selected!=='unassigned')await projectReference(db,request.params.companyId,selected);
+    const company=await access(request,'orders.read'),selected=request.query.projectId;
+    if(selected!==undefined&&selected!=='unassigned')await projectReference(db,company.id,selected);
+    const from=businessDate(request.query.from??'0001-01-01'),to=businessDate(request.query.to??'9999-12-31');if(from>to)fail(400,'invalid_date_range');
     const filter=selected===undefined?'':" AND data::jsonb->>'projectId' IS NOT DISTINCT FROM ?";
-    return {items:(await db.prepare(`SELECT * FROM orders WHERE company_id=? AND id>?${filter} ORDER BY id LIMIT ?`).all(request.params.companyId,request.query.after??'',...(selected===undefined?[]:[selected==='unassigned'?null:selected]),pageLimit(request.query))).map(row=>({...row,data:JSON.parse(row.data)}))};
+    const rows=await db.prepare(`SELECT * FROM orders WHERE company_id=? AND id>? AND COALESCE(data::jsonb->>'businessDate',substring(created_at,1,10))>=? AND COALESCE(data::jsonb->>'businessDate',substring(created_at,1,10))<=?${filter} ORDER BY id LIMIT ?`).all(company.id,request.query.after??'',from,to,...(selected===undefined?[]:[selected==='unassigned'?null:selected]),pageLimit(request.query));
+    return {businessDate:businessDate(undefined,company.timezone),items:await Promise.all(rows.map(r=>getOrder(company.id,r.id))),nextCursor:rows.length===pageLimit(request.query)?rows.at(-1).id:null};
   });
   app.get('/v1/companies/:companyId/orders/:id', { preHandler: auth }, async request => { (await access(request, 'orders.read')); return (await getOrder(request.params.companyId, request.params.id)); });
+  app.get('/v1/companies/:companyId/orders/:id/payments',{preHandler:auth},async request=>{
+    await access(request,'orders.read');await getOrder(request.params.companyId,request.params.id);
+    return {items:await db.prepare('SELECT p.*,w.name AS wallet_name FROM payments p LEFT JOIN wallets w ON w.company_id=p.company_id AND w.id=p.wallet_id WHERE p.company_id=? AND p.order_id=? ORDER BY p.business_date,p.id').all(request.params.companyId,request.params.id)};
+  });
   app.post('/v1/companies/:companyId/orders/:id/reserve', { preHandler: auth }, async request => (await command(request, 'orders.fulfill', 'order.reserve', async company => {
     const order = (await getOrder(company.id, request.params.id));
     if (order.status !== 'NEW') fail(409, 'invalid_order_state');
@@ -321,6 +338,11 @@ export async function createApp(options = {}) {
     (await db.prepare("UPDATE orders SET status='CANCELLED' WHERE id=?").run(order.id));
     return { id: order.id, status: 'CANCELLED' };
   })));
+  app.post('/v1/companies/:companyId/orders/:id/restore',{preHandler:auth},request=>command(request,'orders.write','order.restore',async company=>{
+    const order=await getOrder(company.id,request.params.id);if(order.status!=='CANCELLED')fail(409,'invalid_order_state');
+    await db.prepare("UPDATE orders SET status='NEW' WHERE company_id=? AND id=?").run(company.id,order.id);
+    return {id:order.id,status:'NEW'};
+  }));
   app.post('/v1/companies/:companyId/orders/:id/ship', { preHandler: auth }, async request => (await command(request, 'orders.fulfill', 'order.ship', async company => {
     const order = (await getOrder(company.id, request.params.id));
     if (order.status !== 'RESERVED') fail(409, 'invalid_order_state');
@@ -333,22 +355,82 @@ export async function createApp(options = {}) {
     integer(cogs, 'cogs');
     (await db.prepare('DELETE FROM reservations WHERE order_id=?').run(order.id));
     (await db.prepare("UPDATE orders SET status='SHIPPED' WHERE id=?").run(order.id));
-    if (order.data.total) (await postJournal(db, company, { scope: order.data.scope, projectId: order.data.projectId, description: `Sale ${order.id}`, lines: [{ account: 'receivables', debit: order.data.total }, { account: 'revenue', credit: order.data.total }] }));
-    if (cogs) (await postJournal(db, company, { scope: order.data.scope, projectId: order.data.projectId, description: `COGS ${order.id}`, lines: [{ account: 'cogs', debit: cogs }, { account: 'inventory', credit: cogs }] }));
+    if(order.data.total){
+      const posted=await postJournal(db,company,{scope:order.data.scope,businessDate:order.data.businessDate,projectId:order.data.projectId,description:`Продажа товаров ${order.id}`,lines:[{account:'receivables',debit:order.data.total},{account:'revenue',credit:order.data.net??order.data.total},...(order.data.vat?[{account:'vat_payable',credit:order.data.vat}]:[])]});
+      await db.prepare('INSERT INTO order_postings VALUES(?,?,?,?)').run(company.id,order.id,posted.id,'REVENUE');
+    }
+    if(cogs){
+      const posted=await postJournal(db,company,{scope:order.data.scope,businessDate:order.data.businessDate,projectId:order.data.projectId,description:`Себестоимость товаров ${order.id}`,lines:[{account:'cogs',debit:cogs},{account:'inventory',credit:cogs}]});
+      await db.prepare('INSERT INTO order_postings VALUES(?,?,?,?)').run(company.id,order.id,posted.id,'COGS');
+    }
     return { id: order.id, status: 'SHIPPED', revenue: order.data.total, cogs, grossProfit: order.data.total - cogs };
   })));
   app.post('/v1/companies/:companyId/orders/:id/payments', { preHandler: auth }, async request => (await command(request, 'payments.write', 'order.payment', async company => {
     const order = (await getOrder(company.id, request.params.id));
     if (order.status !== 'SHIPPED') fail(409, 'invalid_order_state');
     const amount = integer(object(request.body).amount, 'amount', 1);
-    const paid = (await db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE order_id=?').get(order.id)).total;
+    const paid = (await db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE order_id=? AND NOT voided').get(order.id)).total;
     if (paid + amount > order.data.total) fail(409, 'overpayment');
-    const id = randomUUID();
-    (await db.prepare('INSERT INTO payments VALUES(?,?,?,?,?)').run(id, company.id, order.id, amount, now()));
-    (await postJournal(db, company, { scope: order.data.scope, projectId: order.data.projectId, description: `Payment ${id}`, lines: [{ account: 'cash', debit: amount }, { account: 'receivables', credit: amount }] }));
+    const body=object(request.body),date=businessDate(body.businessDate,company.timezone);
+    const id=randomUUID();let cashAccount='cash',walletId=null;
+    if(body.walletId!==undefined){
+      await access(request,'wallets.transact');
+      const wallet=await db.prepare('SELECT * FROM wallets WHERE company_id=? AND id=?').get(company.id,text(body.walletId,'walletId'));
+      if(!wallet)fail(404,'wallet_not_found');if(wallet.scope!==order.data.scope)fail(400,'incompatible_ledger_scope');
+      walletId=wallet.id;cashAccount=`wallet:${wallet.id}`;
+    }
+    const posting=await postJournal(db,company,{scope:order.data.scope,projectId:order.data.projectId,businessDate:date,description:`Оплата товаров ${id}`,lines:[{account:cashAccount,debit:amount},{account:'receivables',credit:amount}]});
+    await db.prepare('INSERT INTO payments(id,company_id,order_id,amount,created_at,wallet_id,journal_id,business_date) VALUES(?,?,?,?,?,?,?,?)').run(id,company.id,order.id,amount,now(),walletId,posting.id,date);
+    if(walletId)await db.prepare('INSERT INTO wallet_entries(id,company_id,wallet_id,amount,kind,reference_id,created_at,journal_id) VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(),company.id,walletId,amount,'ORDER_PAYMENT',id,now(),posting.id);
+    await projectOrderPayments(db,company,order);
     if (paid + amount === order.data.total) (await db.prepare("UPDATE orders SET status='CLOSED' WHERE id=?").run(order.id));
     return { id, orderId: order.id, amount, outstanding: order.data.total - paid - amount };
   })));
+  const getGoodsPayment=async(companyId,orderId,paymentId)=>{
+    const payment=await db.prepare('SELECT * FROM payments WHERE company_id=? AND order_id=? AND id=?').get(companyId,orderId,paymentId);
+    if(!payment)fail(404,'payment_not_found');return payment;
+  };
+  app.get('/v1/companies/:companyId/orders/:id/payments/:paymentId/history',{preHandler:auth},async request=>{
+    const company=await access(request,'orders.read');await getGoodsPayment(company.id,request.params.id,request.params.paymentId);
+    return {items:await db.prepare("SELECT h.*,u.name AS actor_name FROM entity_history h JOIN users u ON u.id=h.actor_id WHERE h.company_id=? AND h.kind='goods_payment' AND h.entity_id=? ORDER BY h.revision").all(company.id,request.params.paymentId)};
+  });
+  const updateGoodsStatus=async(company,order)=>{
+    const settlement=await projectOrderPayments(db,company,order);
+    await db.prepare('UPDATE orders SET status=? WHERE id=?').run(settlement.paid>=order.data.total?'CLOSED':'SHIPPED',order.id);
+    return settlement;
+  };
+  app.put('/v1/companies/:companyId/orders/:id/payments/:paymentId',{preHandler:auth},request=>command(request,'payments.write','order.payment.edit',async company=>{
+    await access(request,'wallets.transact');
+    const order=await getOrder(company.id,request.params.id),old=await getGoodsPayment(company.id,order.id,request.params.paymentId),body=object(request.body);
+    if(old.voided)fail(409,'payment_voided');if(body.version!==old.version)fail(409,'version_conflict');
+    const amount=integer(body.amount,'amount',1),date=businessDate(body.businessDate??old.business_date,company.timezone);
+    const wallet=await db.prepare('SELECT * FROM wallets WHERE company_id=? AND id=?').get(company.id,text(body.walletId??old.wallet_id,'walletId'));
+    if(!wallet)fail(404,'wallet_not_found');if(wallet.scope!==order.data.scope)fail(400,'incompatible_ledger_scope');
+    const previous=await db.prepare('SELECT lines FROM journal WHERE company_id=? AND id=?').get(company.id,old.journal_id);
+    if(!previous)fail(422,'order_payment_source_missing');
+    await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'goods_payment',old.id,JSON.stringify({...old,reason:text(body.reason??'Исправление оплаты товара','reason',500)}),request.user.id);
+    await db.prepare('UPDATE payments SET amount=?,business_date=?,wallet_id=?,version=version+1 WHERE id=?').run(amount,date,wallet.id,old.id);
+    const linked=await db.prepare('SELECT id FROM wallet_entries WHERE company_id=? AND journal_id=?').get(company.id,old.journal_id);
+    if(linked)await db.prepare('UPDATE wallet_entries SET wallet_id=?,amount=? WHERE id=?').run(wallet.id,amount,linked.id);
+    else await db.prepare('INSERT INTO wallet_entries(id,company_id,wallet_id,amount,kind,reference_id,created_at,journal_id) VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(),company.id,wallet.id,amount,'ORDER_PAYMENT',old.id,now(),old.journal_id);
+    const settlement=await updateGoodsStatus(company,order);
+    await syncWalletBalances(db,company.id,JSON.parse(previous.lines));
+    return {...await getGoodsPayment(company.id,order.id,old.id),...settlement};
+  }));
+  for(const [action,voided]of [['void',true],['restore',false]])app.post(`/v1/companies/:companyId/orders/:id/payments/:paymentId/${action}`,{preHandler:auth},request=>command(request,'payments.write',`order.payment.${action}`,async company=>{
+    await access(request,'wallets.transact');
+    const order=await getOrder(company.id,request.params.id),old=await getGoodsPayment(company.id,order.id,request.params.paymentId),body=object(request.body);
+    if(body.version!==old.version)fail(409,'version_conflict');
+    if(old.voided===voided)return old;
+    const source=await db.prepare('SELECT * FROM journal WHERE company_id=? AND id=?').get(company.id,voided?old.journal_id:old.void_journal_id);
+    if(!source)fail(422,'order_payment_source_missing');
+    await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'goods_payment',old.id,JSON.stringify(old),request.user.id);
+    const posted=await postJournal(db,company,{scope:source.scope,projectId:source.project_id,businessDate:source.business_date,description:`${voided?'Отмена':'Восстановление'} оплаты товара ${old.id}`,lines:JSON.parse(source.lines).map(l=>({account:l.account,debit:l.credit,credit:l.debit}))});
+    await db.prepare('INSERT INTO order_postings VALUES(?,?,?,?)').run(company.id,order.id,posted.id,voided?'PAYMENT_VOID':'PAYMENT_RESTORE');
+    if(old.wallet_id){const cash=posted.lines.find(l=>l.account===`wallet:${old.wallet_id}`);await db.prepare('INSERT INTO wallet_entries(id,company_id,wallet_id,amount,kind,reference_id,created_at,journal_id) VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(),company.id,old.wallet_id,cash.debit-cash.credit,voided?'ORDER_PAYMENT_VOID':'ORDER_PAYMENT_RESTORE',old.id,now(),posted.id);}
+    await db.prepare('UPDATE payments SET voided=?,void_journal_id=?,version=version+1 WHERE id=?').run(voided,voided?posted.id:null,old.id);
+    return {...await getGoodsPayment(company.id,order.id,old.id),...await updateGoodsStatus(company,order)};
+  }));
   app.post('/v1/companies/:companyId/accounting/journal', { preHandler: auth }, async request => command(request, 'accounting.post', 'journal.post', async company => {
     const body = object(request.body);
     if(Array.isArray(body.lines)&&body.lines.some(line=>typeof line?.account==='string'&&line.account.startsWith('wallet:')))await access(request,'wallets.transact');

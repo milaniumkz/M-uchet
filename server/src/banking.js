@@ -58,9 +58,9 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
     const company=await access(request,'bank.read');
     const item=await db.prepare('SELECT * FROM bank_imports WHERE company_id=? AND id=?').get(company.id,request.params.id);
     if(!item)fail(404,'bank_import_not_found');
-    const rows=await db.prepare(`SELECT r.*,p.voided AS payment_voided,e.id AS wallet_entry_id,e.amount AS current_amount,e.kind AS current_kind,e.reference_id AS current_reference_id,j.description AS current_description,j.business_date AS current_business_date,j.project_id AS current_project_id
+    const rows=await db.prepare(`SELECT r.*,op.order_id AS source_order_id,COALESCE(p.voided,op.voided) AS payment_voided,e.id AS wallet_entry_id,e.amount AS current_amount,e.kind AS current_kind,e.reference_id AS current_reference_id,j.description AS current_description,j.business_date AS current_business_date,j.project_id AS current_project_id
       FROM bank_import_rows r LEFT JOIN commercial_payments p ON p.company_id=r.company_id AND p.id=r.payment_id LEFT JOIN wallet_entries e ON e.journal_id=r.journal_id AND e.wallet_id=r.wallet_id
-      LEFT JOIN journal j ON j.id=r.journal_id WHERE r.company_id=? AND r.import_id=? ORDER BY r.business_date,r.id`).all(company.id,item.id);
+      LEFT JOIN payments op ON op.company_id=r.company_id AND (op.journal_id=r.journal_id OR op.id=e.reference_id) LEFT JOIN journal j ON j.id=r.journal_id WHERE r.company_id=? AND r.import_id=? ORDER BY r.business_date,r.id`).all(company.id,item.id);
     return {...item,items:rows};
   });
   const existingEntry = async (request, companyId, row, id) => {
@@ -69,6 +69,7 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
       WHERE e.company_id=? AND e.wallet_id=? AND e.id=?`).get(companyId,row.wallet_id,text(id,'entryId'));
     if(!entry)fail(404,'wallet_entry_not_found');
     if(entry.amount!==row.amount||entry.business_date!==row.business_date)fail(409,'bank_existing_entry_mismatch');
+    if(await db.prepare('SELECT 1 FROM payments WHERE company_id=? AND journal_id=? AND voided=TRUE').get(companyId,entry.journal_id))fail(409,'bank_payment_voided');
     if(await db.prepare('SELECT 1 FROM commercial_payments WHERE company_id=? AND journal_id=? AND voided=TRUE').get(companyId,entry.journal_id))fail(409,'bank_payment_voided');
     if(await db.prepare('SELECT 1 FROM bank_import_rows WHERE company_id=? AND wallet_id=? AND (journal_id=? OR matched_entry_id=?) AND id<>?').get(companyId,row.wallet_id,entry.journal_id,entry.id,row.id))fail(409,'bank_entry_already_matched');
     return entry;
@@ -80,6 +81,7 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
       FROM wallet_entries e JOIN journal j ON j.company_id=e.company_id AND j.id=e.journal_id
       WHERE e.company_id=? AND e.wallet_id=? AND e.amount=? AND j.business_date=?
       AND NOT EXISTS(SELECT 1 FROM bank_import_rows r WHERE r.company_id=e.company_id AND r.wallet_id=e.wallet_id AND (r.journal_id=e.journal_id OR r.matched_entry_id=e.id) AND r.id<>?)
+      AND NOT EXISTS(SELECT 1 FROM payments p WHERE p.company_id=e.company_id AND p.journal_id=e.journal_id AND p.voided=TRUE)
       AND NOT EXISTS(SELECT 1 FROM commercial_payments p WHERE p.company_id=e.company_id AND p.journal_id=e.journal_id AND p.voided=TRUE)
       ORDER BY e.created_at DESC,e.id LIMIT 100`).all(company.id,row.wallet_id,row.amount,row.business_date,row.id);
     return {items};

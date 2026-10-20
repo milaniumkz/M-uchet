@@ -9,6 +9,7 @@ import 'commercial_detail.dart';
 import 'input_dialogs.dart';
 import 'cash_workspace.dart';
 import 'journal_editor.dart';
+import 'goods_workspace.dart';
 
 const bankCategories = {
   'INCOME': 'Доход',
@@ -168,6 +169,22 @@ class _BankWorkspaceState extends State<BankWorkspace> {
   }
 
   Future<void> reviewSource(Map<String, dynamic> row) async {
+    if (row['source_order_id'] != null &&
+        hasCompanyPermission(context, 'orders.read')) {
+      await showGoodsOrder(
+        context,
+        api: widget.api,
+        companyId: widget.companyId,
+        orderId: row['source_order_id'] as String,
+        currency: widget.currency,
+        projects: widget.projects,
+        onChanged: widget.onChanged,
+      );
+      if (mounted) {
+        await load();
+      }
+      return;
+    }
     if (row['journal_id'] != null) {
       if (row['document_id'] != null) {
         final doc = await CommercialRepository(

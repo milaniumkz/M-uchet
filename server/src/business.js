@@ -1,3 +1,4 @@
+import { projectOrderPayments } from './order-payments.js';
 import { registerProjectRoutes } from './projects.js';
 import { randomUUID } from 'node:crypto';
 import { fail, integer, scope, text, businessDate, bankIban } from './security.js';
@@ -57,6 +58,8 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
 
   const assetSource=async(companyId,id)=>db.prepare('SELECT asset_id FROM asset_postings WHERE company_id=? AND journal_id=? LIMIT 1').get(companyId,id);
   const commercialSource=async(companyId,id)=>db.prepare(`SELECT document_id FROM commercial_postings WHERE company_id=? AND journal_id=? UNION SELECT document_id FROM commercial_payments WHERE company_id=? AND journal_id=? UNION SELECT p.document_id FROM commercial_payments p JOIN wallet_entries e ON e.reference_id=p.id WHERE p.company_id=? AND e.journal_id=? LIMIT 1`).get(companyId,id,companyId,id,companyId,id);
+  const orderSource=async(companyId,id)=>db.prepare('SELECT order_id FROM order_postings WHERE company_id=? AND journal_id=? UNION SELECT order_id FROM payments WHERE company_id=? AND journal_id=? UNION SELECT order_id FROM order_settlement_postings WHERE company_id=? AND journal_id=? UNION SELECT p.order_id FROM payments p JOIN wallet_entries e ON e.company_id=p.company_id AND e.reference_id=p.id WHERE p.company_id=? AND e.journal_id=? LIMIT 1').get(companyId,id,companyId,id,companyId,id,companyId,id);
+
   route('GET', '/wallets', async request => {
     const company=await access(request,'wallets.read');
     return { businessDate:businessDate(undefined,company.timezone),items: (await db.prepare('SELECT * FROM wallets WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId, request.query.after ?? '', pageLimit(request.query))) };
@@ -343,9 +346,9 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const company=await access(request,'accounting.read');
     const row=await db.prepare('SELECT * FROM journal WHERE company_id=? AND id=?').get(company.id,request.params.id);
     if(!row)fail(404,'journal_not_found');
-    const source=await commercialSource(company.id,row.id),asset=await assetSource(company.id,row.id),transfer=await db.prepare("SELECT reference_id FROM wallet_entries WHERE company_id=? AND journal_id=? AND kind IN ('TRANSFER_IN','TRANSFER_OUT') LIMIT 1").get(company.id,row.id);
+    const order=await orderSource(company.id,row.id),source=await commercialSource(company.id,row.id),asset=await assetSource(company.id,row.id),transfer=await db.prepare("SELECT reference_id FROM wallet_entries WHERE company_id=? AND journal_id=? AND kind IN ('TRANSFER_IN','TRANSFER_OUT') LIMIT 1").get(company.id,row.id);
     const revision=(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(row.id)).n;
-    return {...row,revision,lines:JSON.parse(row.lines),sourceDocumentId:source?.document_id??null,sourceAssetId:asset?.asset_id??null,sourceTransferId:transfer?.reference_id??null};
+    return {...row,revision,lines:JSON.parse(row.lines),sourceDocumentId:source?.document_id??null,sourceOrderId:order?.order_id??null,sourceAssetId:asset?.asset_id??null,sourceTransferId:transfer?.reference_id??null};
   });
   for (const [operation,status,permission] of [['close','CLOSED','periods.close'],['reopen','OPEN','periods.reopen']]) {
     route('POST', `/periods/:month/${operation}`, async request => command(request, permission, `period.${operation}`, async company => {
@@ -381,7 +384,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if(body.expectedRevision!==undefined&&body.expectedRevision!==(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(old.id)).n)fail(409,'version_conflict');
     await db.prepare("SELECT set_config('app.edit_reason',?,true)").get(reason);
     const replacement={id:old.id,projectId:await projectReference(db,company.id,Object.hasOwn(body,'projectId')?body.projectId:old.project_id),scope:scope(body.scope??old.scope),description:text(body.description??old.description,'description',500),businessDate:businessDate(body.businessDate??old.business_date,company.timezone),lines:normalizeLines({lines:body.lines??JSON.parse(old.lines)})};
-    if((await commercialSource(company.id,old.id)||await assetSource(company.id,old.id))&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
+    if((await commercialSource(company.id,old.id)||await assetSource(company.id,old.id)||await orderSource(company.id,old.id))&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
     if([...JSON.parse(old.lines),...replacement.lines].some(line=>line.account.startsWith('wallet:')))await access(request,'wallets.transact');
     await db.prepare('UPDATE journal SET scope=?,description=?,lines=?,business_date=?,project_id=? WHERE id=?').run(replacement.scope,replacement.description,JSON.stringify(replacement.lines),replacement.businessDate,replacement.projectId,old.id);
     await db.prepare('DELETE FROM journal_lines WHERE entry_id=?').run(old.id);
@@ -404,7 +407,11 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
   route('PUT','/orders/:id',async request=>command(request,'orders.edit','order.edit',async company=>{
     const old=await db.prepare('SELECT * FROM orders WHERE company_id=? AND id=?').get(company.id,request.params.id);
     if(!old)fail(404,'order_not_found');
-    const previous=JSON.parse(old.data),next=await orderInput(db,company.id,{...previous,...object(request.body)});
+    const previous=JSON.parse(old.data),body=object(request.body);
+    if(body.expectedRevision!==undefined&&body.expectedRevision!==(await db.prepare("SELECT count(*) AS n FROM entity_history WHERE company_id=? AND kind='order' AND entity_id=?").get(company.id,old.id)).n)fail(409,'version_conflict');
+    previous.businessDate??=(await db.prepare('SELECT business_date FROM journal WHERE company_id=? AND description=? ORDER BY created_at LIMIT 1').get(company.id,`Sale ${old.id}`))?.business_date??old.created_at.substring(0,10);
+    const next=await orderInput(db,company.id,{...previous,...body},company.timezone,previous);
+    if(await db.prepare('SELECT 1 FROM payments p JOIN wallets w ON w.company_id=p.company_id AND w.id=p.wallet_id WHERE p.company_id=? AND p.order_id=? AND NOT p.voided AND w.scope<>? LIMIT 1').get(company.id,old.id,next.scope))fail(400,'incompatible_ledger_scope');
     await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'order',old.id,JSON.stringify(old),request.user.id);
     const shipped=['SHIPPED','CLOSED'].includes(old.status);
     let oldCost=0,newCost=0;
@@ -429,19 +436,21 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     }
     let status=old.status;
     if(shipped){
-      const paid=(await db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE order_id=?').get(old.id)).total;
-      const oldCredit=previous.customerCredit??0,newCredit=Math.max(0,paid-next.total);
-      const adjust=async(ledgerScope,debit,credit,delta,projectId)=>{if(delta)await journal(company,ledgerScope,`Order edit ${old.id}`,delta>0?debit:credit,delta>0?credit:debit,Math.abs(delta),projectId);};
-      if(next.scope===previous.scope && next.projectId===(previous.projectId??null)){
-        await adjust(next.scope,'receivables','revenue',next.total-previous.total,next.projectId);
+      const paid=(await db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE order_id=? AND NOT voided').get(old.id)).total;
+      const newCredit=Math.max(0,paid-next.total);
+      const adjust=async(ledgerScope,debit,credit,delta,projectId,date)=>{
+        if(delta){const posted=await journal(company,ledgerScope,`Исправление продажи ${old.id}`,delta>0?debit:credit,delta>0?credit:debit,Math.abs(delta),projectId,date??next.businessDate);await db.prepare('INSERT INTO order_postings VALUES(?,?,?,?)').run(company.id,old.id,posted.id,'CORRECTION');}
+      };
+      if(next.scope===previous.scope && next.projectId===(previous.projectId??null)&&next.businessDate===previous.businessDate){
+        await adjust(next.scope,'receivables','revenue',next.net-(previous.net??previous.total),next.projectId);
         await adjust(next.scope,'cogs','inventory',newCost-oldCost,next.projectId);
-        await adjust(next.scope,'receivables','customer_advances',newCredit-oldCredit,next.projectId);
+        await adjust(next.scope,'receivables','vat_payable',next.vat-(previous.vat??0),next.projectId);
       }else{
-        await adjust(previous.scope,'receivables','revenue',-previous.total,previous.projectId);await adjust(previous.scope,'cogs','inventory',-oldCost,previous.projectId);
-        await adjust(previous.scope,'cash','receivables',-paid,previous.projectId);await adjust(previous.scope,'receivables','customer_advances',-oldCredit,previous.projectId);
-        await adjust(next.scope,'receivables','revenue',next.total,next.projectId);await adjust(next.scope,'cogs','inventory',newCost,next.projectId);
-        await adjust(next.scope,'cash','receivables',paid,next.projectId);await adjust(next.scope,'receivables','customer_advances',newCredit,next.projectId);
+        await adjust(previous.scope,'receivables','revenue',-(previous.net??previous.total),previous.projectId,previous.businessDate);await adjust(previous.scope,'cogs','inventory',-oldCost,previous.projectId,previous.businessDate);
+        await adjust(previous.scope,'receivables','vat_payable',-(previous.vat??0),previous.projectId,previous.businessDate);
+        await adjust(next.scope,'receivables','revenue',next.net,next.projectId);await adjust(next.scope,'receivables','vat_payable',next.vat,next.projectId);await adjust(next.scope,'cogs','inventory',newCost,next.projectId);
       }
+      await projectOrderPayments(db,company,{id:old.id,data:next});
       next.customerCredit=newCredit;status=paid>=next.total?'CLOSED':'SHIPPED';
     }
     await db.prepare('UPDATE orders SET data=?,status=? WHERE id=?').run(JSON.stringify(next),status,old.id);
@@ -449,6 +458,6 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
   }));
   route('GET','/orders/:id/history',async request=>{
     await access(request,'orders.read');
-    return {items:await db.prepare("SELECT * FROM entity_history WHERE company_id=? AND kind='order' AND entity_id=? ORDER BY revision").all(request.params.companyId,request.params.id)};
+    return {items:await db.prepare("SELECT h.*,u.name AS actor_name FROM entity_history h JOIN users u ON u.id=h.actor_id WHERE h.company_id=? AND h.kind='order' AND h.entity_id=? ORDER BY h.revision").all(request.params.companyId,request.params.id),events:await db.prepare('SELECT a.*,u.name AS actor_name FROM audit a JOIN users u ON u.id=a.actor_id WHERE a.company_id=? AND (a.resource_id=? OR a.resource_id IN(SELECT id FROM payments WHERE company_id=? AND order_id=?)) ORDER BY a.sequence DESC LIMIT 200').all(request.params.companyId,request.params.id,request.params.companyId,request.params.id)};
   });
 }
