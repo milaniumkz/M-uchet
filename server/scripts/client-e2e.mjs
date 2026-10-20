@@ -26,6 +26,7 @@ const available = [
   "test_live/payroll_workspace_test.dart",
   "test_live/tax_calendar_workspace_test.dart",
   "test_live/company_search_test.dart",
+  "test_live/debts_workspace_test.dart",
 ];
 const requested = process.argv.slice(2);
 if (requested.some((file) => !available.includes(file)))

@@ -58,6 +58,11 @@ export function registerSearchRoutes(app, { db, auth }) {
         "SELECT id,name AS title,'ASSET' AS kind,inventory_number AS detail FROM fixed_assets WHERE company_id=? AND (name ILIKE ? OR inventory_number ILIKE ?) ORDER BY name,id LIMIT ?",
         [pattern, pattern],
       );
+      await add(
+        ["debts.read"],
+        "SELECT id,COALESCE(data->'counterparty'->>'name',id) AS title,'DEBT' AS kind,business_date::text AS detail FROM debts WHERE company_id=? AND (data->'counterparty'->>'name' ILIKE ? OR data->>'notes' ILIKE ? OR id=?) ORDER BY business_date DESC,id LIMIT ?",
+        [pattern, pattern, q],
+      );
       const all = groups.flat(),
         lower = q.toLocaleLowerCase("ru");
       all.sort(

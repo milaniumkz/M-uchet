@@ -1,3 +1,4 @@
+import 'debts_workspace.dart';
 import 'journal_editor.dart';
 export 'journal_editor.dart' show JournalEditor;
 import 'company_access.dart';
@@ -185,7 +186,18 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
       if (!mounted) {
         return;
       }
-      if (details['sourceTransferId'] != null &&
+      if (details['sourceDebtId'] != null &&
+          hasCompanyPermission(context, 'debts.read')) {
+        await showOpeningDebt(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          debtId: details['sourceDebtId'] as String,
+          currency: widget.currency,
+          projects: widget.projects,
+          onChanged: widget.onChanged,
+        );
+      } else if (details['sourceTransferId'] != null &&
           hasCompanyPermission(context, 'wallets.read')) {
         await showWalletTransfer(
           context,

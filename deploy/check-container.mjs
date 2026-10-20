@@ -87,7 +87,7 @@ try {
     assert.equal(response.status, expected, `${method} ${path}`);
     return response.json();
   }
-  assert.equal((await request("GET", "/health")).schemaVersion, 21);
+  assert.equal((await request("GET", "/health")).schemaVersion, 22);
   assert.equal((await fetch(origin + "/")).status, 200);
   assert.ok([403, 404].includes((await fetch(origin + "/.env")).status));
   await request(
@@ -111,6 +111,28 @@ try {
     type: "CAPITAL",
     amount: 1234567,
     description: "SYNTHETIC FUNDS",
+  });
+  const client = await request("POST", base + "/resources/clients", {
+    data: { name: "SYNTHETIC CONTAINER CLIENT" },
+  });
+  const debt = await request("POST", base + "/debts", {
+    type: "AR",
+    counterpartyId: client.id,
+    amount: 500,
+    businessDate: "2026-01-10",
+  });
+  await request("POST", base + `/debts/${debt.id}/settlements`, {
+    walletId: wallet.id,
+    amount: 300,
+    businessDate: "2026-01-05",
+  });
+  const currentDebt = await request("GET", base + `/debts/${debt.id}`);
+  await request("PUT", base + `/debts/${debt.id}`, {
+    version: currentDebt.version,
+    type: "AR",
+    counterpartyId: client.id,
+    amount: 200,
+    businessDate: "2026-02-10",
   });
   const task = await request("POST", base + "/tax-calendar", {
     title: "SYNTHETIC CONTAINER TASK",
@@ -142,7 +164,7 @@ try {
     (await request("GET", base + "/wallets")).items.find(
       (w) => w.id === wallet.id,
     ).balance,
-    1234567,
+    1234867,
   );
   assert.equal(
     (await request("GET", base + "/tax-calendar")).items[0].id,
@@ -254,7 +276,39 @@ try {
       `SELECT balance FROM public.wallets WHERE id='${wallet.id}'`,
     ])
   ).trim();
-  assert.equal(restoredBalance, "1234567");
+  assert.equal(restoredBalance, "1234867");
+  const restoredDebt = (
+    await compose([
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "muchet",
+      "-d",
+      "restored",
+      "-At",
+      "-c",
+      `SELECT total::text || ':' || remaining::text || ':' || version::text FROM public.debts WHERE id='${debt.id}'`,
+    ])
+  ).trim();
+  assert.equal(restoredDebt, "200:0:3");
+  const restoredPayment = (
+    await compose([
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "muchet",
+      "-d",
+      "restored",
+      "-At",
+      "-c",
+      `SELECT amount::text || ':' || business_date::text FROM public.debt_payments WHERE debt_id='${debt.id}'`,
+    ])
+  ).trim();
+  assert.equal(restoredPayment, "300:2026-01-05");
   await compose(["exec", "-T", "api", "mkdir", "/app/data/restore-check"]);
   await compose(
     ["exec", "-T", "api", "tar", "-xzf", "-", "-C", "/app/data/restore-check"],
@@ -296,7 +350,7 @@ try {
     (await request("GET", base + "/wallets")).items.find(
       (w) => w.id === wallet.id,
     ).balance,
-    1234567,
+    1234867,
   );
   await compose([
     "run",
@@ -334,15 +388,15 @@ try {
   ).token;
   assert.ok(token);
   console.log(
-    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
+    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected opening debt, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
   );
 } catch (error) {
   try {
     console.error(
-      (await compose(["logs", "--tail", "30", "api"])).replaceAll(
+      (await compose(["logs", "--tail", "30", "api", "db"])).replaceAll(
         databasePassword,
         "[REDACTED]",
-      ),
+      ).replaceAll(adminPassword,"[REDACTED]"),
     );
   } catch {}
   throw error;

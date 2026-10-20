@@ -1,3 +1,4 @@
+import 'debts_workspace.dart';
 import '../backend/rest/repositories.dart';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
@@ -304,7 +305,18 @@ class _CashWorkspaceState extends State<CashWorkspace> {
       if (!mounted) {
         return;
       }
-      if (data['sourcePayrollId'] != null &&
+      if (data['sourceDebtId'] != null &&
+          hasCompanyPermission(context, 'debts.read')) {
+        await showOpeningDebt(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          debtId: data['sourceDebtId'] as String,
+          currency: widget.currency,
+          projects: widget.projects,
+          onChanged: widget.onChanged,
+        );
+      } else if (data['sourcePayrollId'] != null &&
           hasCompanyPermission(context, 'payroll.read')) {
         await showPayrollRecord(
           context,

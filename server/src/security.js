@@ -35,7 +35,7 @@ export function businessDate(value, timezone = 'Asia/Almaty') {
     const get = type => parts.find(p => p.type === type).value;
     value = `${get('year')}-${get('month')}-${get('day')}`;
   }
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0,10) !== value) fail(400, 'invalid_business_date');
+  if (typeof value !== 'string' || value.startsWith('0000') || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0,10) !== value) fail(400, 'invalid_business_date');
   return value;
 }
 

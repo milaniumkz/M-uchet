@@ -1,3 +1,4 @@
+import { debtSource } from './debts.js';
 import { profitBucket, accumulateProfit, profitResult } from './profit.js';
 import { projectOrderPayments } from './order-payments.js';
 import { registerProjectRoutes } from './projects.js';
@@ -59,6 +60,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
 
   const assetSource=async(companyId,id)=>db.prepare('SELECT asset_id FROM asset_postings WHERE company_id=? AND journal_id=? LIMIT 1').get(companyId,id);
   const commercialSource=async(companyId,id)=>db.prepare(`SELECT document_id FROM commercial_postings WHERE company_id=? AND journal_id=? UNION SELECT document_id FROM commercial_payments WHERE company_id=? AND journal_id=? UNION SELECT p.document_id FROM commercial_payments p JOIN wallet_entries e ON e.reference_id=p.id WHERE p.company_id=? AND e.journal_id=? LIMIT 1`).get(companyId,id,companyId,id,companyId,id);
+  const transferSource=async(companyId,id)=>db.prepare("SELECT reference_id FROM wallet_entries WHERE company_id=? AND journal_id=? AND kind IN ('TRANSFER_IN','TRANSFER_OUT') LIMIT 1").get(companyId,id);
   const payrollSource=async(companyId,id)=>db.prepare('SELECT payroll_id FROM payroll_postings WHERE company_id=? AND journal_id=? UNION SELECT payroll_id FROM payroll_payments WHERE company_id=? AND (journal_id=? OR void_journal_id=?) LIMIT 1').get(companyId,id,companyId,id,id);
   const orderSource=async(companyId,id)=>db.prepare('SELECT order_id FROM order_postings WHERE company_id=? AND journal_id=? UNION SELECT order_id FROM payments WHERE company_id=? AND journal_id=? UNION SELECT order_id FROM order_settlement_postings WHERE company_id=? AND journal_id=? UNION SELECT p.order_id FROM payments p JOIN wallet_entries e ON e.company_id=p.company_id AND e.reference_id=p.id WHERE p.company_id=? AND e.journal_id=? LIMIT 1').get(companyId,id,companyId,id,companyId,id,companyId,id);
 
@@ -202,45 +204,6 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     return { items: (await db.prepare('SELECT * FROM movements WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId, request.query.after ?? '', pageLimit(request.query))).map(r => ({ ...r, data: JSON.parse(r.data) })) };
   });
 
-  route('POST', '/debts', async request => (await command(request, 'debts.write', 'debt.create', async company => {
-    const body = object(request.body), amount = integer(body.amount, 'amount', 1), ledgerScope = scope(body.scope);
-    if (!['AR','AP'].includes(body.type)) fail(400, 'invalid_debt_type');
-    const counterpartyId = text(body.counterpartyId, 'counterpartyId');
-    (await requireReference(company.id, body.type === 'AR' ? 'clients' : 'suppliers', counterpartyId));
-    let dueDate = null;
-    if (body.dueDate !== undefined) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(body.dueDate) || !Number.isFinite(Date.parse(body.dueDate)) || new Date(body.dueDate).toISOString().slice(0,10) !== body.dueDate) fail(400, 'invalid_due_date');
-      dueDate = body.dueDate;
-    }
-    const id = randomUUID();
-    (await db.prepare('INSERT INTO debts VALUES(?,?,?,?,?,?,?,?,?)').run(id, company.id, body.type, counterpartyId, amount, amount, ledgerScope, dueDate, now()));
-    await journal(company, ledgerScope, `Opening debt ${id}`, body.type === 'AR' ? 'receivables' : 'opening_balances', body.type === 'AR' ? 'opening_balances' : 'payables', amount,body.projectId,body.businessDate);
-    return { id, type: body.type, total: amount, remaining: amount, scope: ledgerScope, dueDate };
-  })));
-  route('GET', '/debts', async request => {
-    (await access(request, 'debts.read'));
-    return { items: (await db.prepare('SELECT * FROM debts WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId, request.query.after ?? '', pageLimit(request.query))) };
-  });
-  route('POST', '/debts/:id/settlements', async request => (await command(request, 'debts.settle', 'debt.settle', async company => {
-    const debt = (await db.prepare('SELECT * FROM debts WHERE company_id=? AND id=?').get(company.id, request.params.id));
-    if (!debt) fail(404, 'debt_not_found');
-    const body = object(request.body), amount = integer(body.amount, 'amount', 1), row = (await wallet(company.id, body.walletId));
-    if (amount > debt.remaining) fail(409, 'overpayment');
-    if (row.scope !== debt.scope) fail(400, 'incompatible_ledger_scope');
-    const id = randomUUID();
-    (await applyWallet(company.id, row.id, debt.type === 'AR' ? amount : -amount, 'DEBT_PAYMENT', id));
-    (await db.prepare('UPDATE debts SET remaining=remaining-? WHERE id=?').run(amount, debt.id));
-    (await db.prepare('INSERT INTO debt_payments VALUES(?,?,?,?,?,?)').run(id, company.id, debt.id, row.id, amount, now()));
-    if (debt.type === 'AR') (await journal(company, debt.scope, `Debt payment ${id}`, `wallet:${row.id}`, 'receivables', amount,body.projectId,body.businessDate));
-    else (await journal(company, debt.scope, `Debt payment ${id}`, 'payables', `wallet:${row.id}`, amount,body.projectId,body.businessDate));
-    return { id, debtId: debt.id, remaining: debt.remaining - amount };
-  })));
-  route('GET', '/debts/:id/payments', async request => {
-    (await access(request, 'debts.read'));
-    if (!(await db.prepare('SELECT 1 FROM debts WHERE company_id=? AND id=?').get(request.params.companyId, request.params.id))) fail(404, 'debt_not_found');
-    return { items: (await db.prepare('SELECT * FROM debt_payments WHERE company_id=? AND debt_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId, request.params.id, request.query.after ?? '', pageLimit(request.query))) };
-  });
-
   route('POST', '/shifts', async request => (await command(request, 'shifts.write', 'shift.open', async company => {
     const body = object(request.body), row = (await wallet(company.id, body.walletId));
     if ((await db.prepare("SELECT 1 FROM cash_shifts WHERE wallet_id=? AND status='OPEN'").get(row.id))) fail(409, 'shift_already_open');
@@ -311,7 +274,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if ((await db.prepare('SELECT 1 FROM journal_reversals WHERE original_id=? OR reversal_id=?').get(row.id, row.id))) fail(409, 'journal_already_reversed');
     // Reversing generated journal entries independently would desynchronize stock/wallets/orders.
     if (!row.description.startsWith('Manual: ')) fail(409, 'business_command_reversal_required');
-    if(await commercialSource(company.id,row.id))fail(409,'source_document_edit_required');
+    if(await commercialSource(company.id,row.id)||await assetSource(company.id,row.id)||await orderSource(company.id,row.id)||await payrollSource(company.id,row.id)||await debtSource(db,company.id,row.id)||await transferSource(company.id,row.id))fail(409,'source_document_edit_required');
     const reason = text(object(request.body).reason, 'reason', 400);
     const result = (await postJournal(db, company, { scope: row.scope, projectId: row.project_id, description: `Reversal: ${reason}`, lines: JSON.parse(row.lines).map(line => ({ account: line.account, debit: line.credit, credit: line.debit })) }));
     await registerManualWalletEntries(db,company.id,result.id,result.lines,'JOURNAL_REVERSAL');
@@ -343,9 +306,9 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const company=await access(request,'accounting.read');
     const row=await db.prepare('SELECT * FROM journal WHERE company_id=? AND id=?').get(company.id,request.params.id);
     if(!row)fail(404,'journal_not_found');
-    const payroll=await payrollSource(company.id,row.id),order=await orderSource(company.id,row.id),source=await commercialSource(company.id,row.id),asset=await assetSource(company.id,row.id),transfer=await db.prepare("SELECT reference_id FROM wallet_entries WHERE company_id=? AND journal_id=? AND kind IN ('TRANSFER_IN','TRANSFER_OUT') LIMIT 1").get(company.id,row.id);
+    const debt=await debtSource(db,company.id,row.id),payroll=await payrollSource(company.id,row.id),order=await orderSource(company.id,row.id),source=await commercialSource(company.id,row.id),asset=await assetSource(company.id,row.id),transfer=await db.prepare("SELECT reference_id FROM wallet_entries WHERE company_id=? AND journal_id=? AND kind IN ('TRANSFER_IN','TRANSFER_OUT') LIMIT 1").get(company.id,row.id);
     const revision=(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(row.id)).n;
-    return {...row,revision,lines:JSON.parse(row.lines),sourceDocumentId:source?.document_id??null,sourceOrderId:order?.order_id??null,sourcePayrollId:payroll?.payroll_id??null,sourceAssetId:asset?.asset_id??null,sourceTransferId:transfer?.reference_id??null};
+    return {...row,revision,lines:JSON.parse(row.lines),sourceDocumentId:source?.document_id??null,sourceOrderId:order?.order_id??null,sourcePayrollId:payroll?.payroll_id??null,sourceDebtId:debt?.debt_id??null,sourceAssetId:asset?.asset_id??null,sourceTransferId:transfer?.reference_id??null};
   });
   for (const [operation,status,permission] of [['close','CLOSED','periods.close'],['reopen','OPEN','periods.reopen']]) {
     route('POST', `/periods/:month/${operation}`, async request => command(request, permission, `period.${operation}`, async company => {
@@ -381,7 +344,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if(body.expectedRevision!==undefined&&body.expectedRevision!==(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(old.id)).n)fail(409,'version_conflict');
     await db.prepare("SELECT set_config('app.edit_reason',?,true)").get(reason);
     const replacement={id:old.id,projectId:await projectReference(db,company.id,Object.hasOwn(body,'projectId')?body.projectId:old.project_id),scope:scope(body.scope??old.scope),description:text(body.description??old.description,'description',500),businessDate:businessDate(body.businessDate??old.business_date,company.timezone),lines:normalizeLines({lines:body.lines??JSON.parse(old.lines)})};
-    if((await commercialSource(company.id,old.id)||await assetSource(company.id,old.id)||await orderSource(company.id,old.id)||await payrollSource(company.id,old.id))&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
+    if((await commercialSource(company.id,old.id)||await assetSource(company.id,old.id)||await orderSource(company.id,old.id)||await payrollSource(company.id,old.id)||await debtSource(db,company.id,old.id)||await transferSource(company.id,old.id))&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
     if([...JSON.parse(old.lines),...replacement.lines].some(line=>line.account.startsWith('wallet:')))await access(request,'wallets.transact');
     await db.prepare('UPDATE journal SET scope=?,description=?,lines=?,business_date=?,project_id=? WHERE id=?').run(replacement.scope,replacement.description,JSON.stringify(replacement.lines),replacement.businessDate,replacement.projectId,old.id);
     await db.prepare('DELETE FROM journal_lines WHERE entry_id=?').run(old.id);

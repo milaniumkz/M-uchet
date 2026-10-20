@@ -1,3 +1,4 @@
+import 'debts_workspace.dart';
 import '../backend/rest/repositories.dart';
 import 'company_access.dart';
 import 'dart:convert';
@@ -167,6 +168,22 @@ class _BankWorkspaceState extends State<BankWorkspace> {
   }
 
   Future<void> reviewSource(Map<String, dynamic> row) async {
+    if (row['source_debt_id'] != null &&
+        hasCompanyPermission(context, 'debts.read')) {
+      await showOpeningDebt(
+        context,
+        api: widget.api,
+        companyId: widget.companyId,
+        debtId: row['source_debt_id'] as String,
+        currency: widget.currency,
+        projects: widget.projects,
+        onChanged: widget.onChanged,
+      );
+      if (mounted) {
+        await load();
+      }
+      return;
+    }
     if (row['source_payroll_id'] != null &&
         hasCompanyPermission(context, 'payroll.read')) {
       await showPayrollRecord(

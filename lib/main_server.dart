@@ -1,3 +1,4 @@
+import 'workspace/debts_workspace.dart';
 import 'workspace/company_search.dart';
 import 'workspace/commercial_detail.dart';
 import 'workspace/counterparty_workspace.dart';
@@ -68,6 +69,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'purchases': 'Покупки',
     'bank': 'Деньги',
     'cash': 'Касса',
+    'debts': 'Долги',
     'inventory': 'Склад',
     'assets': 'Активы',
     'employees': 'Сотрудники',
@@ -91,6 +93,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     'goods' => can('orders.read') && can('catalog.read'),
     'bank' => can('bank.read') && can('wallets.read'),
     'cash' => can('wallets.read'),
+    'debts' => can('debts.read'),
     'inventory' => can('inventory.read') && can('catalog.read'),
     'assets' => can('assets.read'),
     'employees' => can('employees.read'),
@@ -992,6 +995,18 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
       });
       return;
     }
+    if (kind == 'DEBT') {
+      await showOpeningDebt(
+        navigator.currentContext!,
+        api: api,
+        companyId: selectedCompany.id,
+        debtId: id,
+        currency: selectedCompany.currency,
+        projects: projects,
+        onChanged: refresh,
+      );
+      return;
+    }
     Map<String, dynamic>? entity;
     ResourceDto? resource;
     if (!['GOODS', 'ASSET'].contains(kind)) {
@@ -1139,6 +1154,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                       'purchases' => Icons.shopping_bag_outlined,
                       'bank' => Icons.account_balance_wallet_outlined,
                       'cash' => Icons.payments_outlined,
+                      'debts' => Icons.handshake_outlined,
                       'reports' => Icons.bar_chart_outlined,
                       'inventory' => Icons.warehouse_outlined,
                       'assets' => Icons.computer_outlined,
@@ -1267,6 +1283,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                         'purchases',
                         'goods',
                         'employees',
+                        'debts',
                         'payroll',
                         'reports',
                         'journal',
@@ -1418,6 +1435,16 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           onChanged: refresh,
                           onEmployees: () =>
                               setState(() => section = 'employees'),
+                        )
+                      : section == 'debts'
+                      ? DebtsWorkspace(
+                          key: ValueKey('${company!.id}:debts:$selected'),
+                          api: api,
+                          companyId: company!.id,
+                          currency: company!.currency,
+                          projects: projects,
+                          projectId: selected,
+                          onChanged: refresh,
                         )
                       : section == 'tax-calendar'
                       ? TaxCalendarWorkspace(

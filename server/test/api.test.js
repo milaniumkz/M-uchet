@@ -223,7 +223,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 21);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 22);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -1248,3 +1248,128 @@ test('production request logs omit search queries, credentials and private datab
  assert.equal(logs.includes('private-iin-111111111111'),false);
  assert.equal(logs.includes('correct-horse-battery'),false);assert.equal(logs.includes(f.owner.token),false);
 });
+
+async function debtFixture(t,type='AR'){
+ const f=await fixture(t),kind=type==='AR'?'clients':'suppliers';
+ const party=(await f.api('POST','/resources/'+kind,{data:{name:'SYNTHETIC OPENING PARTY'}})).body;
+ const project=(await f.api('POST','/projects',{name:'SYNTHETIC OPENING A'})).body;
+ const wallet=(await f.api('POST','/wallets',{name:'SYNTHETIC OPENING CASH'})).body;
+ const otherWallet=(await f.api('POST','/wallets',{name:'SYNTHETIC OPENING BANK'})).body;
+ const body={type,counterpartyId:party.id,amount:500,projectId:project.id,businessDate:'2026-01-10',dueDate:'2026-01-31'};
+ const created=await f.api('POST','/debts',body);assert.equal(created.status,200,JSON.stringify(created.body));
+ return {...f,party,project,wallet,otherWallet,body,debt:created.body};
+}
+test('paid opening debt corrections preserve cash and move advances and dated balances across projects after close',async t=>{
+ const f=await debtFixture(t),other=(await f.api('POST','/projects',{name:'SYNTHETIC OPENING B'})).body;
+ const key=randomUUID(),payment={walletId:f.wallet.id,amount:300,businessDate:'2026-01-05',debtVersion:f.debt.version};
+ const paid=await f.api('POST',`/debts/${f.debt.id}/settlements`,payment,key);assert.equal(paid.status,200);assert.deepEqual((await f.api('POST',`/debts/${f.debt.id}/settlements`,payment,key)).body,paid.body);
+ let current=(await f.api('GET','/debts/'+f.debt.id)).body;assert.equal(current.remaining,200);assert.equal(current.version,2);
+ await f.api('POST','/periods/2026-01/close',{reason:'SYNTHETIC REVIEWED'});
+ const edit=await f.api('PUT','/debts/'+f.debt.id,{...f.body,version:current.version,amount:200,projectId:other.id,businessDate:'2026-02-10'});assert.equal(edit.status,200,JSON.stringify(edit.body));current=edit.body;
+ assert.equal(current.remaining,0);assert.equal(current.advance,100);assert.equal(current.paid,300);assert.equal(current.sourceComplete,true);
+ assert.equal((await f.api('GET','/wallets')).body.items.find(w=>w.id===f.wallet.id).balance,300);
+ const january=(await f.api('GET',`/accounting/trial-balance?to=2026-01-31&projectId=${other.id}`)).body.accounts;
+ assert.equal(january.find(a=>a.account==='customer_advances').balance,-300);assert.equal(january.find(a=>a.account==='receivables')?.balance??0,0);
+ const oldProject=(await f.api('GET',`/accounting/trial-balance?projectId=${f.project.id}`)).body.accounts;
+ assert.ok(oldProject.every(a=>a.balance===0));
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.netProfit,0);
+ assert.equal((await f.api('PUT','/debts/'+f.debt.id,{...f.body,version:1})).status,409);
+ assert.equal((await f.api('GET',`/debts/${f.debt.id}/history`)).body.items.length,1);
+});
+test('opening debt payment edits, voided corrections and restore preserve source history and exclude cancelled bank candidates',async t=>{
+ const f=await debtFixture(t);const paid=(await f.api('POST',`/debts/${f.debt.id}/settlements`,{walletId:f.wallet.id,amount:300,businessDate:'2026-01-05'})).body;
+ const path=`/debts/${f.debt.id}/payments/${paid.id}`;
+ const edit=await f.api('PUT',path,{version:1,walletId:f.otherWallet.id,amount:150,businessDate:'2026-01-07'});assert.equal(edit.status,200);const oldJournal=edit.body.journal_id;
+ assert.equal((await f.api('POST',path+'/void',{version:2})).status,200);
+ const inactiveEdit=await f.api('PUT',path,{version:3,walletId:f.wallet.id,amount:600,businessDate:'2026-01-06'});assert.equal(inactiveEdit.status,200);
+ assert.equal((await f.api('GET','/wallets')).body.items.find(w=>w.id===f.wallet.id).balance,0,'editing a voided payment must not change money');
+ const restored=await f.api('POST',path+'/restore',{version:4,allowAdvance:true});assert.equal(restored.status,200,JSON.stringify(restored.body));assert.notEqual(restored.body.journal_id,oldJournal);
+ const debt=(await f.api('GET','/debts/'+f.debt.id)).body;assert.equal(debt.advance,100);assert.equal(debt.remaining,0);
+ const wallets=(await f.api('GET','/wallets')).body.items;assert.equal(wallets.find(w=>w.id===f.wallet.id).balance,600);assert.equal(wallets.find(w=>w.id===f.otherWallet.id).balance,0);
+ const source=(await f.api('GET','/accounting/journal/'+restored.body.journal_id)).body;assert.equal(source.sourceDebtId,f.debt.id);
+ assert.equal((await f.api('PUT','/accounting/journal/'+source.id,{lines:[{account:`wallet:${f.wallet.id}`,debit:1},{account:'capital',credit:1}]})).status,409);
+ assert.equal((await f.api('PUT','/accounting/journal/'+source.id,{description:'Manual: renamed source'})).status,200);
+ assert.equal((await f.api('POST','/accounting/journal/'+source.id+'/reverse',{reason:'Attempted bypass'})).status,409);
+ const statement=await f.api('POST','/bank-imports',{walletId:f.otherWallet.id,filename:'SYNTHETIC old debt.csv',csv:'date;reference;debit;credit;description\n2026-01-07;old-debt;0;1.50;SYNTHETIC old entry'});assert.equal(statement.status,200);
+ const imported=(await f.api('GET',`/bank-imports/${statement.body.id}`)).body;
+ const candidate=(await f.api('GET',`/bank-imports/${statement.body.id}/rows/${imported.items[0].id}/candidates`)).body;assert.equal(candidate.items.length,0);
+ assert.equal((await f.api('GET',`/debts/${f.debt.id}/history`)).body.items.length,4);
+ const activeImport=(await f.api('POST','/bank-imports',{walletId:f.wallet.id,csv:'date;reference;debit;credit;description\n2026-01-06;active-debt;0;6.00;SYNTHETIC active entry'})).body;
+ const activeRow=(await f.api('GET',`/bank-imports/${activeImport.id}`)).body.items[0],activePath=`/bank-imports/${activeImport.id}/rows/${activeRow.id}`;
+ const activeCandidates=(await f.api('GET',activePath+'/candidates')).body.items;assert.equal(activeCandidates.length,1);
+ assert.equal((await f.api('PUT',activePath,{version:1,classification:'EXISTING',entryId:activeCandidates[0].id})).status,200);
+ assert.equal((await f.api('POST',activePath+'/post',{version:2})).status,200);
+ let linked=(await f.api('GET',`/bank-imports/${activeImport.id}`)).body.items[0];assert.equal(linked.source_debt_id,f.debt.id);assert.equal(linked.payment_voided,false);
+ assert.equal((await f.api('POST',path+'/void',{version:5})).status,200);
+ linked=(await f.api('GET',`/bank-imports/${activeImport.id}`)).body.items[0];assert.equal(linked.payment_voided,true);
+});
+test('supplier debt refunds and changing opening debt direction never rewrite the actual direction of cash',async t=>{
+ const f=await debtFixture(t,'AP');await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:2000,description:'SYNTHETIC FUNDS'});
+ assert.equal((await f.api('POST',`/debts/${f.debt.id}/settlements`,{walletId:f.wallet.id,amount:300,businessDate:'2026-01-05'})).status,200);
+ assert.equal((await f.api('POST',`/debts/${f.debt.id}/settlements`,{walletId:f.wallet.id,amount:100,direction:'IN',businessDate:'2026-01-15'})).status,200);
+ let current=(await f.api('GET','/debts/'+f.debt.id)).body;assert.equal(current.remaining,300);assert.equal(current.paid,200);assert.equal(current.paidOut,300);assert.equal(current.received,100);
+ const client=(await f.api('POST','/resources/clients',{data:{name:'SYNTHETIC CORRECTED CLIENT'}})).body;
+ const corrected=await f.api('PUT','/debts/'+f.debt.id,{...f.body,version:current.version,type:'AR',counterpartyId:client.id,amount:400});assert.equal(corrected.status,200,JSON.stringify(corrected.body));assert.equal(corrected.body.remaining,600);
+ current=(await f.api('POST',`/debts/${f.debt.id}/cancel`,{version:corrected.body.version})).body;assert.equal(current.status,'CANCELLED');assert.equal(current.remaining,200,'the actual cash paid out still forms a receivable');
+ current=(await f.api('POST',`/debts/${f.debt.id}/restore`,{version:current.version})).body;assert.equal(current.remaining,600);
+ assert.equal((await f.api('GET','/wallets')).body.items.find(w=>w.id===f.wallet.id).balance,1800);
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.netProfit,0);
+});
+test('spent debt receipts cannot be removed or moved without funds while non-cash historical corrections remain available',async t=>{
+ const f=await debtFixture(t),paid=(await f.api('POST',`/debts/${f.debt.id}/settlements`,{walletId:f.wallet.id,amount:300})).body;
+ await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'EXPENSE',amount:250,description:'SYNTHETIC SPENT CASH'});
+ const path=`/debts/${f.debt.id}/payments/${paid.id}`;
+ assert.equal((await f.api('POST',path+'/void',{version:1})).status,409);
+ assert.equal((await f.api('PUT',path,{version:1,walletId:f.otherWallet.id,amount:300})).status,409);
+ assert.equal((await f.api('GET',`/debts/${f.debt.id}/payments`)).body.items[0].version,1);
+ const current=(await f.api('GET','/debts/'+f.debt.id)).body;
+ const correction=await f.api('PUT','/debts/'+f.debt.id,{...f.body,version:current.version,amount:200});assert.equal(correction.status,200);assert.equal(correction.body.advance,100);
+ const wallets=(await f.api('GET','/wallets')).body.items;assert.equal(wallets.find(w=>w.id===f.wallet.id).balance,50);assert.equal(wallets.find(w=>w.id===f.otherWallet.id).balance,0);
+});
+test('opening debt operations require cash authority, company-owned references and real Gregorian dates',async t=>{
+ const f=await debtFixture(t),reader=await f.user('debt-reader@example.test');
+ await f.api('PUT',`/members/${reader.id}`,{permissions:['debts.read','debts.settle']});
+ const blocked=await f.call('POST',f.prefix+`/debts/${f.debt.id}/settlements`,{walletId:f.wallet.id,amount:100},reader.token,randomUUID());assert.equal(blocked.status,403);
+ assert.equal((await f.api('GET',`/debts/${f.debt.id}/payments`)).body.items.length,0);
+ assert.equal((await f.api('POST','/debts',{...f.body,businessDate:'0000-01-01'})).status,400);
+ assert.equal((await f.api('POST','/debts',{...f.body,dueDate:'2026-02-30'})).status,400);
+ const foreign=(await f.call('POST','/v1/companies',{name:'Foreign debt firm',currency:'KZT'},reader.token)).body;
+ const party=(await f.call('POST',`/v1/companies/${foreign.id}/resources/clients`,{data:{name:'Foreign party'}},reader.token,randomUUID())).body;
+ assert.equal((await f.api('POST','/debts',{...f.body,counterpartyId:party.id})).status,404);
+ assert.equal((await f.call('GET',`/v1/companies/${foreign.id}/debts/${f.debt.id}`,null,reader.token)).status,404);
+ const summary=(await f.api('GET','/debts?scope=ACCOUNTING&limit=1')).body;assert.equal(summary.summary[0].outstanding,500);
+});
+
+test('opening debt reads keep one financial snapshot while a concurrent payment is committed',async t=>{
+ const f=await debtFixture(t),prepare=f.app.db.prepare;
+ let announce,release;const readStarted=new Promise(resolve=>announce=resolve),resume=new Promise(resolve=>release=resolve);let paused=false;
+ f.app.db.prepare=sql=>{const statement=prepare(sql);if(sql==='SELECT * FROM debts WHERE company_id=? AND id=?')return {...statement,get:async(...args)=>{const result=await statement.get(...args);if(!paused){paused=true;announce();await resume;}return result;}};return statement;};
+ let reading;
+ try{
+  reading=f.api('GET','/debts/'+f.debt.id);await readStarted;
+  const paid=await f.api('POST',`/debts/${f.debt.id}/settlements`,{walletId:f.wallet.id,amount:300});assert.equal(paid.status,200);
+  release();const snapshot=await reading;assert.equal(snapshot.body.version,1);assert.equal(snapshot.body.paid,0);assert.equal(snapshot.body.remaining,500);
+ }finally{release();f.app.db.prepare=prepare;if(reading)await reading;}
+ const latest=(await f.api('GET','/debts/'+f.debt.id)).body;assert.equal(latest.version,2);assert.equal(latest.paid,300);assert.equal(latest.remaining,200);
+});
+
+test('a renamed cash transfer cannot bypass its business source through manual journal edit or reversal',async t=>{
+ const f=await fixture(t),a=(await f.api('POST','/wallets',{name:'Transfer guard A'})).body,b=(await f.api('POST','/wallets',{name:'Transfer guard B'})).body;
+ await f.api('POST',`/wallets/${a.id}/transactions`,{type:'CAPITAL',amount:1000,description:'SYNTHETIC SOURCE FUNDS'});
+ const transfer=(await f.api('POST','/wallet-transfers',{sourceWalletId:a.id,targetWalletId:b.id,amount:200})).body;
+ const rows=(await f.api('GET',`/wallets/${a.id}/entries`)).body.items;const journalId=rows.find(e=>e.reference_id===transfer.id).journal_id;
+ assert.equal((await f.api('PUT','/accounting/journal/'+journalId,{description:'Manual: source renamed'})).status,200);
+ assert.equal((await f.api('POST','/accounting/journal/'+journalId+'/reverse',{reason:'Attempted source bypass'})).status,409);
+ assert.equal((await f.api('PUT','/accounting/journal/'+journalId,{lines:[{account:`wallet:${a.id}`,credit:100},{account:`wallet:${b.id}`,debit:100}]})).status,409);
+ const wallets=(await f.api('GET','/wallets')).body.items;assert.equal(wallets.find(w=>w.id===a.id).balance,800);assert.equal(wallets.find(w=>w.id===b.id).balance,200);
+});
+
+ test('opening debts participate in company search only with debt read permission',async t=>{
+ const f=await debtFixture(t);
+ const result=(await f.api('GET','/search?q='+f.debt.id)).body;
+ assert.ok(result.items.some(x=>x.kind==='DEBT'&&x.id===f.debt.id));
+ const reader=await f.user('debt-search@example.test');
+ await f.api('PUT',`/members/${reader.id}`,{permissions:['catalog.read']});
+ const privateResult=await f.call('GET',f.prefix+'/search?q='+f.debt.id,null,reader.token);
+ assert.equal(privateResult.status,200);assert.equal(privateResult.body.items.length,0);
+ });

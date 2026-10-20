@@ -122,6 +122,13 @@ class BackendException implements Exception {
       'calendar_task_not_found': 'Задача не найдена в этой фирме.',
       'calendar_date_confirmation_required':
           'Подтвердите проверку даты и применимости срока.',
+      'debt_source_reconciliation_required':
+          'Старые проводки долга требуют сверки источников. Пересчёт не выполнен.',
+      'debt_reconciliation_confirmation_required':
+          'Подтвердите пересчёт расходящихся данных старого регистра.',
+      'invalid_payment_direction': 'Выберите поступление или списание денег.',
+      'invalid_debt_type': 'Выберите: нам должны или мы должны.',
+      'invalid_debt_status': 'Проверьте состояние начального остатка.',
       'invalid_search': 'Введите от2 до160 символов для поиска.',
       'invalid_calendar_task': 'Проверьте поля задачи и её статус.',
       'invalid_preparation': 'Проверьте отметки подготовки.',

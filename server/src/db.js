@@ -32,9 +32,9 @@ export async function openDatabase({ connectionString = process.env.DATABASE_URL
     async close() { await pool.end(); },
   };
   try {
-    await pool.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
     await transaction(db, async () => {
       await db.exec("SELECT pg_advisory_xact_lock(62700321)");
+      await db.exec(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
       await db.exec('CREATE TABLE IF NOT EXISTS schema_versions(version INTEGER PRIMARY KEY)');
       if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=2').get()) {
         await db.exec(await readFile(new URL('../migrations/001_initial.sql', import.meta.url), 'utf8'));
@@ -96,6 +96,9 @@ export async function openDatabase({ connectionString = process.env.DATABASE_URL
       if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=21').get()) {
         await db.exec(await readFile(new URL('../migrations/020_tax_calendar.sql', import.meta.url), 'utf8'));
       }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=22').get()) {
+        await db.exec(await readFile(new URL('../migrations/021_opening_debt_register.sql', import.meta.url), 'utf8'));
+      }
     });
     return db;
   } catch (error) { await pool.end(); throw error; }
@@ -111,4 +114,9 @@ export async function transaction(db, fn) {
     return result;
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
+}
+
+export async function readSnapshot(db,fn) {
+  if(context.getStore()?.db===db)return fn();
+  return transaction(db,async()=>{await db.exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');return fn();});
 }

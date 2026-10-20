@@ -1,3 +1,4 @@
+import { registerDebtRoutes } from './debts.js';
 import { safeErrorSummary } from './logging.js';
 import { registerSearchRoutes } from './search.js';
 import { registerTaxCalendarRoutes } from './tax-calendar.js';
@@ -499,6 +500,7 @@ export async function createApp(options = {}) {
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
   registerInvitationRoutes(app,{db,auth,owner,object});
+  registerDebtRoutes(app,{db,auth,access,command,object,pageLimit});
   registerSearchRoutes(app,{db,auth});
   registerTaxCalendarRoutes(app,{db,auth,access,command,object,pageLimit});
   registerPayrollRoutes(app,{db,auth,access,command,object,pageLimit});

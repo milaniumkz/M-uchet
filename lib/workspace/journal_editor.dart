@@ -27,6 +27,15 @@ class _JournalEditorState extends State<JournalEditor> {
     context,
     widget.entry == null ? 'accounting.post' : 'accounting.edit',
   );
+  bool get sourceBound => const [
+    'sourceDocumentId',
+    'sourceOrderId',
+    'sourcePayrollId',
+    'sourceAssetId',
+    'sourceDebtId',
+    'sourceTransferId',
+  ].any((key) => widget.entry?[key] != null);
+  bool get financialEditable => editable && !sourceBound;
   late final description = TextEditingController(
     text: widget.entry?['description'] as String? ?? '',
   );
@@ -188,6 +197,13 @@ class _JournalEditorState extends State<JournalEditor> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (sourceBound)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'Финансовые поля исправляются через документ-основание. Здесь можно изменить описание и сохранить причину правки.',
+                  ),
+                ),
               TextField(
                 controller: description,
                 enabled: !busy && pending == null && editable,
@@ -196,7 +212,7 @@ class _JournalEditorState extends State<JournalEditor> {
               const SizedBox(height: 12),
               TextField(
                 controller: date,
-                enabled: !busy && pending == null && editable,
+                enabled: !busy && pending == null && financialEditable,
                 decoration: const InputDecoration(labelText: 'Дата YYYY-MM-DD'),
               ),
               const SizedBox(height: 12),
@@ -214,7 +230,7 @@ class _JournalEditorState extends State<JournalEditor> {
                   ),
                   DropdownMenuItem(value: 'BOTH', child: Text('Оба контура')),
                 ],
-                onChanged: busy || pending != null || !editable
+                onChanged: busy || pending != null || !financialEditable
                     ? null
                     : (v) => setState(() => scope = v!),
               ),
@@ -234,7 +250,7 @@ class _JournalEditorState extends State<JournalEditor> {
                     ),
                   ),
                 ],
-                onChanged: busy || pending != null || !editable
+                onChanged: busy || pending != null || !financialEditable
                     ? null
                     : (v) => setState(
                         () => projectId = v == 'unassigned' ? null : v,
@@ -254,7 +270,8 @@ class _JournalEditorState extends State<JournalEditor> {
                         flex: 2,
                         child: TextField(
                           controller: l.account,
-                          enabled: !busy && pending == null && editable,
+                          enabled:
+                              !busy && pending == null && financialEditable,
                           decoration: const InputDecoration(labelText: 'Счёт'),
                         ),
                       ),
@@ -262,7 +279,8 @@ class _JournalEditorState extends State<JournalEditor> {
                       Expanded(
                         child: TextField(
                           controller: l.debit,
-                          enabled: !busy && pending == null && editable,
+                          enabled:
+                              !busy && pending == null && financialEditable,
                           decoration: const InputDecoration(labelText: 'Дебет'),
                         ),
                       ),
@@ -270,7 +288,8 @@ class _JournalEditorState extends State<JournalEditor> {
                       Expanded(
                         child: TextField(
                           controller: l.credit,
-                          enabled: !busy && pending == null && editable,
+                          enabled:
+                              !busy && pending == null && financialEditable,
                           decoration: const InputDecoration(
                             labelText: 'Кредит',
                           ),
@@ -280,7 +299,7 @@ class _JournalEditorState extends State<JournalEditor> {
                         onPressed:
                             busy ||
                                 pending != null ||
-                                !editable ||
+                                !financialEditable ||
                                 lines.length <= 2
                             ? null
                             : () {
@@ -297,7 +316,10 @@ class _JournalEditorState extends State<JournalEditor> {
               }),
               TextButton.icon(
                 onPressed:
-                    busy || pending != null || !editable || lines.length >= 100
+                    busy ||
+                        pending != null ||
+                        !financialEditable ||
+                        lines.length >= 100
                     ? null
                     : () => setState(() => addLine()),
                 icon: const Icon(Icons.add),

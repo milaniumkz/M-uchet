@@ -1,3 +1,4 @@
+import { readSnapshot } from './db.js';
 import { profitBucket, accumulateProfit, profitResult } from './profit.js';
 import { randomUUID } from 'node:crypto';
 import { fail, text, scope, businessDate } from './security.js';
@@ -27,7 +28,7 @@ export function registerProjectRoutes({ route, db, access, command, object }) {
     await db.prepare('UPDATE projects SET name=?,description=?,archived=?,version=? WHERE id=?').run(next.name,next.description,next.archived,next.version,old.id);
     return next;
   }));
-  route('GET', '/reports/projects', async request => {
+  route('GET', '/reports/projects', request => readSnapshot(db,async () => {
     await access(request,'reports.read');
     const companyId = request.params.companyId, ledgerScope = scope(request.query.scope);
     const from = businessDate(request.query.from ?? '0001-01-01'), to = businessDate(request.query.to ?? '9999-12-31');
@@ -48,5 +49,5 @@ export function registerProjectRoutes({ route, db, access, command, object }) {
     const selectionTotal = selected ? profitResult(buckets.get(selected==='unassigned'?null:selected).amounts) : total;
     return { scope:ledgerScope,from,to,currency:(await access(request,'reports.read')).currency,
       items:selected?items.filter(p=>p.projectId===(selected==='unassigned'?null:selected)):items,total,selectionTotal };
-  });
+ }));
 }
