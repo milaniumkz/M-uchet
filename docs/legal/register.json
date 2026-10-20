@@ -414,6 +414,112 @@
       "technical_implementation": false,
       "official_schema_verified": false,
       "accountant_accepted": false
+    },
+    {
+      "id": "P2300000525",
+      "title": "Правила и сроки исчисления, удержания (начисления) и перечисления ОПВ/ОППВ",
+      "url": "https://old.adilet.zan.kz/rus/docs/P2300000525",
+      "article": "6,10",
+      "revision_date": "2026-07-14",
+      "effective_from": null,
+      "effective_to": null,
+      "checked_at": "2026-10-20",
+      "source_status": "selected_sections_researched_not_accountant_accepted",
+      "basis": "Прочитаны п.6 и связанные положения: объект ОПВ наёмного работника, ссылка на ставку Социального кодекса и годовой предел12×50МЗП. Отдельного указания об округлении в проверенном тексте не найдено; это не устанавливает разрешённый способ округления.",
+      "related_features": [
+        "payroll_research"
+      ],
+      "technical_implementation": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false,
+      "retrieved_url": "https://old.adilet.zan.kz/rus/docs/P2300000525",
+      "retrieved_at": "2026-10-20",
+      "content_sha256": "aa53905d7b90e81ec1a62eb37f79b62159e519ff826c32c848ae1867b24d9e5d"
+    },
+    {
+      "id": "P2300000540",
+      "title": "Правила и сроки исчисления (начисления) и перечисления ОПВР",
+      "url": "https://old.adilet.zan.kz/rus/docs/P2300000540",
+      "article": "6,7",
+      "revision_date": "2026-07-12",
+      "effective_from": null,
+      "effective_to": null,
+      "checked_at": "2026-10-20",
+      "source_status": "selected_sections_researched_not_accountant_accepted",
+      "basis": "Прочитаны п.6–7 об объекте ОПВР и исключениях. Исключения и применимость редакций2026 к полной зарплате ещё проверяются. Продуктивный расчёт не включён.",
+      "related_features": [
+        "payroll_research"
+      ],
+      "technical_implementation": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false,
+      "retrieved_url": "https://old.adilet.zan.kz/rus/docs/P2300000540",
+      "retrieved_at": "2026-10-20",
+      "content_sha256": "8b68a1509463fd497b6253bf975b986bff9aee7b392868bb6f77267b68010fbd"
+    },
+    {
+      "id": "V1700015361",
+      "title": "Правила исчисления (удержания) и перечисления отчислений/взносов ОСМС",
+      "url": "https://old.adilet.zan.kz/rus/docs/V1700015361",
+      "article": "39",
+      "revision_date": null,
+      "effective_from": null,
+      "effective_to": null,
+      "checked_at": "2026-10-20",
+      "source_status": "selected_sections_researched_not_accountant_accepted",
+      "basis": "Прочитаны выбранные пункты; применимость исключений и отдельные правила зарплаты ещё проверяются. Правила округления ОСМС п.39 совпадают в архивной редакции01.01.2026 и текущем тексте.",
+      "related_features": [
+        "payroll_research"
+      ],
+      "technical_implementation": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false,
+      "retrieved_url": "https://old.adilet.zan.kz/rus/docs/V1700015361",
+      "retrieved_at": "2026-10-20",
+      "content_sha256": "d9c601388b3ea588d961f39cdb918b23259d1299362014c2e2120b236c0cd006"
+    },
+    {
+      "id": "P040000683_",
+      "title": "Прежние правила социальных отчислений №683",
+      "url": "https://old.adilet.zan.kz/rus/docs/P040000683_",
+      "article": "сноска об утрате силы; прежнее правило округления",
+      "revision_date": null,
+      "effective_from": null,
+      "effective_to": null,
+      "checked_at": "2026-10-20",
+      "source_status": "repealed_not_used_for_2026",
+      "basis": "На странице прямо указана утрата силы постановлением21.08.2020№530. Старое правило округления не используется для расчётов2026; точная дата вступления отмены в силу отдельно не установлена.",
+      "related_features": [
+        "payroll_research_rejected_source"
+      ],
+      "technical_implementation": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false,
+      "retrieved_url": "https://old.adilet.zan.kz/rus/docs/P040000683_",
+      "retrieved_at": "2026-10-20",
+      "content_sha256": "4e30ef59e76fe1130ce625c2923d7729fcae9634ac63cf4b703f246d5b8a79bf"
+    },
+    {
+      "id": "V2300032897",
+      "title": "О некоторых вопросах системы социального страхования и оказания государственных услуг в социально-трудовой сфере, приказ№229",
+      "url": "https://old.adilet.zan.kz/rus/docs/V2300032897",
+      "article": "Приложение1,пп.9,14,15",
+      "revision_date": "2026-07-12",
+      "effective_from": null,
+      "effective_to": null,
+      "checked_at": "2026-10-20",
+      "source_status": "selected_sections_researched_not_accountant_accepted",
+      "basis": "П.9 описывает объект SO работников с вычетом ОПВ и перечисленных исключений; п.14 требует округления тиынов вверх до1тенге независимо от суммы; п.15 — уплату до25числа следующего месяца. Округление сверено с архивом01.01.2026; специальные категории ещё не реализованы.",
+      "related_features": [
+        "payroll_research",
+        "payroll_social_contributions_rounding"
+      ],
+      "technical_implementation": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false,
+      "retrieved_url": "https://old.adilet.zan.kz/rus/docs/V2300032897",
+      "retrieved_at": "2026-10-20",
+      "content_sha256": "1647e48b0a84f124fe6e978bb4c88d78690c5f2813aad09da9ebdddc0bdcf30a"
     }
   ],
   "network_block_resolved": true

@@ -26,7 +26,7 @@
       "calculation_implemented": true,
       "official_schema_verified": false,
       "accountant_accepted": false,
-      "calculation_scope": "Только явно выбранная основная ставка16% на строках документов услуг за2026; не подтверждает применимость к конкретной операции, вычет входящего НДС или готовность декларации."
+      "calculation_scope": "Только явно выбранная основная ставка16% на строках документов услуг и товарных продаж за2026; не подтверждает применимость к конкретной операции, вычет входящего НДС или готовность декларации."
     },
     {
       "id": "KZ-SNR-723-2026",
@@ -222,6 +222,36 @@
       "calculation_implemented": false,
       "official_schema_verified": false,
       "accountant_accepted": false
+    },
+    {
+      "id": "KZ-OSMS-ROUNDING-39",
+      "source_id": "V1700015361",
+      "article": "39",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "summary": "Отчисления и взносы ОСМС исчисляются и перечисляются в целых тенге: менее50тиын округляется вниз, от50тиын — вверх. Подтверждено также архивной редакцией01.01.2026; изменение22.07.2026 в текущей редакции не меняет проверенную границу округления.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false,
+      "archive_url": "https://old.adilet.zan.kz/rus/archive/docs/V1700015361/01.01.2026",
+      "archive_sha256": "227e287681a1ba4cfcf04531160f7f66023f81a1fc590df04bccf888bea5f877"
+    },
+    {
+      "id": "KZ-SO-ROUNDING-14",
+      "source_id": "V2300032897",
+      "article": "Приложение1,14",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "summary": "SO с ненулевыми тиынами округляется вверх до целого тенге независимо от суммы тиынов. Это отличается от округления ОСМС HALF_UP. Проверено в действующем тексте и архиве01.01.2026.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false,
+      "archive_url": "https://old.adilet.zan.kz/rus/archive/docs/V2300032897/01.01.2026",
+      "archive_sha256": "9ea0748e7f0d4404df4841252107a0ca3b3c59d8dc4342b08f0a7a38c3eaa009"
     }
   ]
 }
