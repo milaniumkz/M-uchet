@@ -44,8 +44,6 @@ class _SecurityBlocAppsWidgetState extends State<SecurityBlocAppsWidget>
   String _autoLockTime = '5';
   bool _changingPin = false;
   String _message = '';
-  bool _temporaryEditingEnabled = false;
-  DateTime? _temporaryEditingUntil;
   List<Map<String, dynamic>> _devices = [];
   List<Map<String, dynamic>> _commands = [];
   List<Map<String, dynamic>> _employees = [];
@@ -106,10 +104,7 @@ class _SecurityBlocAppsWidgetState extends State<SecurityBlocAppsWidget>
           .collection('employees')
           .where('idCompany', isEqualTo: effectiveCompanyId)
           .getCached();
-      final companySnap = await _firestore
-          .collection('companies')
-          .doc(effectiveCompanyId)
-          .get(const GetOptions(source: Source.serverAndCache));
+
 
       if (secSnap.docs.isNotEmpty) {
         final raw = secSnap.docs.first.data();
@@ -120,20 +115,7 @@ class _SecurityBlocAppsWidgetState extends State<SecurityBlocAppsWidget>
         _autoLockEnabled = data['autoLockEnabled'] == true;
         _autoLockTime = (data['autoLockTime'] ?? '5').toString();
       }
-      final companyData = companySnap.data();
-      if (companyData != null) {
-        _temporaryEditingEnabled =
-            companyData['temporary_editing_enabled'] == true ||
-                companyData['temporaryEditingEnabled'] == true;
-        _temporaryEditingUntil = _readDateTime(
-          companyData['temporary_editing_until'] ??
-              companyData['temporaryEditingUntil'],
-        );
-        if (_temporaryEditingUntil == null ||
-            !_temporaryEditingUntil!.isAfter(DateTime.now())) {
-          _temporaryEditingEnabled = false;
-        }
-      }
+
 
       setState(() {
         _blocked = snap.docs.map((d) {
@@ -281,52 +263,6 @@ class _SecurityBlocAppsWidgetState extends State<SecurityBlocAppsWidget>
       message: 'Настройки безопасности сохранены',
     );
     setState(() => _message = 'Настройки безопасности сохранены');
-  }
-
-  Future<void> _setTemporaryEditing(bool enabled) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-    final effectiveCompanyId = _effectiveCompanyId(user);
-    final until = enabled ? DateTime.now().add(const Duration(days: 30)) : null;
-    final payload = {
-      'temporary_editing_enabled': enabled,
-      'temporaryEditingEnabled': enabled,
-      'temporary_editing_until':
-          until == null ? FieldValue.delete() : Timestamp.fromDate(until),
-      'temporaryEditingUntil':
-          until == null ? FieldValue.delete() : Timestamp.fromDate(until),
-      'data_locked': !enabled,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    await _firestore.collection('companies').doc(effectiveCompanyId).set(
-          payload,
-          SetOptions(merge: true),
-        );
-    await currentUserReference?.update({
-      ...payload,
-      'updated_at': FieldValue.serverTimestamp(),
-    });
-    await _firestore.collection('security_logs').add({
-      'idCompany': effectiveCompanyId,
-      'user_id': user.uid,
-      'action':
-          enabled ? 'temporary_editing_opened' : 'temporary_editing_closed',
-      'message': enabled
-          ? 'Редактирование документов открыто на 30 дней'
-          : 'Ограничения редактирования возвращены',
-      'temporary_editing_until':
-          until == null ? null : Timestamp.fromDate(until),
-      'created_at': FieldValue.serverTimestamp(),
-    });
-    FirestoreQueryCache.instance
-        .invalidateCompanyCollection('security_settings', effectiveCompanyId);
-    setState(() {
-      _temporaryEditingEnabled = enabled;
-      _temporaryEditingUntil = until;
-      _message = enabled
-          ? 'Редактирование открыто до ${_formatDate(until!)}'
-          : 'Ограничения редактирования включены';
-    });
   }
 
   Future<void> _sendDeviceCommand(
@@ -601,66 +537,6 @@ class _SecurityBlocAppsWidgetState extends State<SecurityBlocAppsWidget>
                   const Text('Безопасность',
                       style:
                           TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: _temporaryEditingEnabled
-                          ? const Color(0xFFEFF6FF)
-                          : FlutterFlowTheme.of(context).primaryBackground,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: _temporaryEditingEnabled
-                            ? const Color(0xFF2563EB)
-                            : FlutterFlowTheme.of(context).alternate,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Временное редактирование документов',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: FlutterFlowTheme.of(context).primaryText,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _temporaryEditingEnabled &&
-                                  _temporaryEditingUntil != null
-                              ? 'Открыто до ${_formatDate(_temporaryEditingUntil!)}'
-                              : 'Ограничения редактирования включены',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: FlutterFlowTheme.of(context).secondaryText,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ElevatedButton.icon(
-                              onPressed: _temporaryEditingEnabled
-                                  ? null
-                                  : () => _setTemporaryEditing(true),
-                              icon: const Icon(Icons.lock_open, size: 18),
-                              label: const Text('Открыть на 30 дней'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: _temporaryEditingEnabled
-                                  ? () => _setTemporaryEditing(false)
-                                  : null,
-                              icon: const Icon(Icons.lock, size: 18),
-                              label: const Text('Вернуть ограничения'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
                   const SizedBox(height: 8),
                   SwitchListTile(
                     title: const Text('Биометрия'),

@@ -1,0 +1,122 @@
+{
+  "not_executable_tax_rules": true,
+  "observations": [
+    {
+      "id": "KZ-TC-ENTRY-848-2026",
+      "source_id": "K2500000214",
+      "article": "848(1)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "summary": "Ввод в действие с 01.01.2026 с исключениями, включая ст.189 с 01.07.2026 и ст.92/главу90 с 01.01.2027.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-VAT-503-2026",
+      "source_id": "K2500000214",
+      "article": "503(1)-(4)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "summary": "Основная ставка 16%; не универсальна для всех операций. Для специальных категорий указаны другие ставки/освобождения; условия требуют отдельной проверки.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-SNR-723-2026",
+      "source_id": "K2500000214",
+      "article": "723(1)-(3)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "summary": "Предел дохода 600000 МРП — одно из условий допуска. Требуются перечень запрещённых видов деятельности, проверка резидентства и ограничений структуры участников.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-SNR-726-2026",
+      "source_id": "K2500000214",
+      "article": "726",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "summary": "Базовые 4%, местный орган может изменить не более чем на 50%. Нужны официальное решение по деятельности/месту и раздельный учёт при разных ставках.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-DEDUCTION-286-16-2026",
+      "source_id": "K2500000214",
+      "article": "286(16)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "summary": "Затраты у поставщика на упрощённом режиме на дату получения не подлежат вычету. Бухгалтерский расход не тождествен налоговому вычету; статус поставщика датируется.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-IP-BOOKKEEPING-2",
+      "source_id": "Z070000234_",
+      "article": "2(2)",
+      "effective_from": null,
+      "effective_to": null,
+      "summary": "Освобождение только для ИП при всех условиях: упрощённый режим и доход до135000МРП, нет НДС-регистрации и статуса естественной монополии. Исторические даты поправок ещё нужно проверить.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-COA-CURRENT-2019",
+      "source_id": "V070004771_",
+      "article": "Примечание/сноска к Типовому плану",
+      "effective_from": "2019-01-01",
+      "effective_to": "2026-12-31",
+      "summary": "Текст текущего плана отсылает к редакции приказа877 с01.01.2019; отдельные пункты имеют более поздние поправки. Полный набор счетов пока не реализован.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-COA-FUTURE-2027",
+      "source_id": "V070004771_",
+      "article": "Примечание о приказе533 от06.08.2026",
+      "effective_from": "2027-01-01",
+      "effective_to": null,
+      "summary": "Опубликованное в2026 изменение вступает в силу01.01.2027; применять к операциям2026 нельзя.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    },
+    {
+      "id": "KZ-BUDGET-2026",
+      "source_id": "Z2500000239",
+      "article": "7(1),7(4)",
+      "effective_from": "2026-01-01",
+      "effective_to": "2026-12-31",
+      "summary": "МЗП85000 тенге, МРП4325 тенге только для2026; не являются полной формулой любого платежа.",
+      "checked_at": "2026-10-20",
+      "status": "selected_text_researched",
+      "calculation_implemented": false,
+      "official_schema_verified": false,
+      "accountant_accepted": false
+    }
+  ]
+}

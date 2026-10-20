@@ -583,20 +583,7 @@ class _SchetaWidgetState extends State<SchetaWidget> {
     return items.where((e) => e.idCompany == companyId).toList();
   }
 
-  Future<bool> _isCompanyLocked() async {
-    final companyId = _effectiveCompanyId();
-    if (companyId.isEmpty) return false;
-    final locked = await CompanyLock.isLocked(companyId);
-    if (locked && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Редактирование отключено после завершения первого входа.'),
-        ),
-      );
-    }
-    return locked;
-  }
+  Future<bool> _isCompanyLocked() async => false;
 
   Future<String?> _renameSchetTitle(
     BuildContext context,

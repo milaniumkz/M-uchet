@@ -74,6 +74,7 @@ firebase-adminsdk-*.json
 .env
 .env.*
 !.env.example
+.runtime/
 
 # Symbolication related
 app.*.symbols

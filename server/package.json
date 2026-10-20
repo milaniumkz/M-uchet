@@ -3,17 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24.0.0 <25" },
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
   "scripts": {
-    "start": "node src/main.js",
-    "dev": "node --watch src/main.js",
-    "test": "node --test test/*.test.js",
-    "backup": "node src/backup.js"
+    "start": "node --env-file-if-exists=../.env src/main.js",
+    "dev": "node --env-file-if-exists=../.env --watch src/main.js",
+    "test": "APP_ENV=test node --env-file-if-exists=../.env --test test/api.test.js test/http.test.js",
+    "backup": "node --env-file-if-exists=../.env src/backup.js",
+    "migrate": "node --env-file-if-exists=../.env src/migrate.js",
+    "openapi": "node --env-file-if-exists=../.env src/openapi.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
     "@fastify/multipart": "^9.0.0",
     "@fastify/rate-limit": "^10.0.0",
-    "fastify": "^5.0.0"
+    "@fastify/static": "^10.1.6",
+    "@fastify/swagger": "^9.9.2",
+    "fastify": "^5.0.0",
+    "pg": "^8.23.1"
   }
 }

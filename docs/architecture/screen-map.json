@@ -1,0 +1,1678 @@
+{
+  "method": "static scan; indirect data flow requires manual review",
+  "screens": [
+    {
+      "screen": "lib/admin/analitika_admin/analitika_admin_widget.dart",
+      "route": "analitikaAdmin",
+      "models": [
+        "lib/admin/analitika_admin/analitika_admin_model.dart"
+      ],
+      "direct_collections": [
+        "companies",
+        "tranzaction",
+        "users",
+        "warehouses"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/biling_admin/biling_admin_widget.dart",
+      "route": "bilingAdmin",
+      "models": [
+        "lib/admin/biling_admin/biling_admin_model.dart"
+      ],
+      "direct_collections": [
+        "billing_invoices"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/company_admin/company_admin_widget.dart",
+      "route": "companyAdmin",
+      "models": [
+        "lib/admin/company_admin/company_admin_model.dart"
+      ],
+      "direct_collections": [
+        "activity_log",
+        "audit_1c_sync_settings",
+        "companies",
+        "company_profile"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/component/add_country/add_country_widget.dart",
+      "route": null,
+      "models": [
+        "lib/admin/component/add_country/add_country_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/component/add_nalog/add_nalog_widget.dart",
+      "route": null,
+      "models": [
+        "lib/admin/component/add_nalog/add_nalog_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/component/add_oced/add_oced_widget.dart",
+      "route": null,
+      "models": [
+        "lib/admin/component/add_oced/add_oced_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/component/add_otrasl/add_otrasl_widget.dart",
+      "route": null,
+      "models": [
+        "lib/admin/component/add_otrasl/add_otrasl_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/component/add_tip/add_tip_widget.dart",
+      "route": null,
+      "models": [
+        "lib/admin/component/add_tip/add_tip_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/component/add_valuta/add_valuta_widget.dart",
+      "route": null,
+      "models": [
+        "lib/admin/component/add_valuta/add_valuta_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/component/drawers/drawers_widget.dart",
+      "route": null,
+      "models": [
+        "lib/admin/component/drawers/drawers_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/design_admin/design_admin_widget.dart",
+      "route": "designAdmin",
+      "models": [],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/home_admin/home_admin_widget.dart",
+      "route": "homeAdmin",
+      "models": [
+        "lib/admin/home_admin/home_admin_model.dart"
+      ],
+      "direct_collections": [
+        "companies",
+        "company_profile",
+        "tranzaction",
+        "users"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/marketing_admin/marketing_admin_widget.dart",
+      "route": "marketingAdmin",
+      "models": [
+        "lib/admin/marketing_admin/marketing_admin_model.dart"
+      ],
+      "direct_collections": [
+        "marketing_campaigns"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/secruriti_admin/secruriti_admin_widget.dart",
+      "route": "secruritiAdmin",
+      "models": [
+        "lib/admin/secruriti_admin/secruriti_admin_model.dart"
+      ],
+      "direct_collections": [
+        "security_logs",
+        "security_settings"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/setting_admin/setting_admin_widget.dart",
+      "route": "settingAdmin",
+      "models": [
+        "lib/admin/setting_admin/setting_admin_model.dart"
+      ],
+      "direct_collections": [
+        "app_settings"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/stat_page_admin/stat_page_admin_widget.dart",
+      "route": "statPageAdmin",
+      "models": [
+        "lib/admin/stat_page_admin/stat_page_admin_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/super_admin/super_admin_widget.dart",
+      "route": "superAdmin",
+      "models": [],
+      "direct_collections": [
+        "companies",
+        "company_profile",
+        "users"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/support_admin/support_admin_widget.dart",
+      "route": "supportAdmin",
+      "models": [
+        "lib/admin/support_admin/support_admin_model.dart"
+      ],
+      "direct_collections": [
+        "support_tickets"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/tarif_admin/tarif_admin_widget.dart",
+      "route": "tarifAdmin",
+      "models": [
+        "lib/admin/tarif_admin/tarif_admin_model.dart"
+      ],
+      "direct_collections": [
+        "tariffs"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/admin/users_admin/users_admin_widget.dart",
+      "route": "usersAdmin",
+      "models": [
+        "lib/admin/users_admin/users_admin_model.dart"
+      ],
+      "direct_collections": [
+        "users"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/analitics/fin_models/fin_models_widget.dart",
+      "route": "finModels",
+      "models": [
+        "lib/analitics/fin_models/fin_models_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "reporting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/analitics/fin_otchet/fin_otchet_widget.dart",
+      "route": "finOtchet",
+      "models": [
+        "lib/analitics/fin_otchet/fin_otchet_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "reporting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/analitics/invest_otchet/invest_otchet_widget.dart",
+      "route": "investOtchet",
+      "models": [
+        "lib/analitics/invest_otchet/invest_otchet_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "reporting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/analitics/marja/marja_widget.dart",
+      "route": "marja",
+      "models": [
+        "lib/analitics/marja/marja_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "reporting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/analitics/otchet_sale/otchet_sale_widget.dart",
+      "route": "otchetSale",
+      "models": [
+        "lib/analitics/otchet_sale/otchet_sale_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "reporting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/auth/add_pin_code/add_pin_code_widget.dart",
+      "route": "addPinCode",
+      "models": [
+        "lib/auth/add_pin_code/add_pin_code_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "identity",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/auth/login/login_widget.dart",
+      "route": "Login",
+      "models": [
+        "lib/auth/login/login_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "identity",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/auth/reg_page/reg_page_widget.dart",
+      "route": "regPage",
+      "models": [
+        "lib/auth/reg_page/reg_page_model.dart"
+      ],
+      "direct_collections": [
+        "companies",
+        "roles"
+      ],
+      "target_module": "identity",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/auth/reg_page_director/reg_page_director_widget.dart",
+      "route": "regPageDirector",
+      "models": [
+        "lib/auth/reg_page_director/reg_page_director_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "identity",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/company/company_setup/company_setup_widget.dart",
+      "route": "companySetup",
+      "models": [],
+      "direct_collections": [
+        "companies",
+        "company_branches",
+        "company_departments",
+        "company_profile",
+        "tariffs"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/company/hr_controls/hr_controls_widget.dart",
+      "route": "hrControls",
+      "models": [
+        "lib/company/hr_controls/hr_controls_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/company/onboarding/company_onboarding_widget.dart",
+      "route": "companyOnboarding",
+      "models": [],
+      "direct_collections": [
+        "companies",
+        "employees",
+        "nomenklatura",
+        "roles",
+        "sheta",
+        "shops",
+        "statRashod",
+        "warehouses"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/company/org_structura/org_structura_widget.dart",
+      "route": "orgStructura",
+      "models": [
+        "lib/company/org_structura/org_structura_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/component/accounting/accounting_mode_bar_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/component/accounting/accounting_workflow_bar_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/component/add_schet/add_schet_widget.dart",
+      "route": null,
+      "models": [
+        "lib/component/add_schet/add_schet_model.dart"
+      ],
+      "direct_collections": [
+        "companies",
+        "company_profile",
+        "valuta"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/component/drawers_users/drawers_users_widget.dart",
+      "route": null,
+      "models": [
+        "lib/component/drawers_users/drawers_users_model.dart"
+      ],
+      "direct_collections": [
+        "audit_1c_runs"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/component/edit_schet/edit_schet_widget.dart",
+      "route": null,
+      "models": [
+        "lib/component/edit_schet/edit_schet_model.dart"
+      ],
+      "direct_collections": [
+        "company_profile"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/component/header/header_widget.dart",
+      "route": null,
+      "models": [
+        "lib/component/header/header_model.dart"
+      ],
+      "direct_collections": [
+        "companies",
+        "company_profile"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/config/home/home_widget.dart",
+      "route": "home",
+      "models": [
+        "lib/config/home/home_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/analytics_fin_models_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "fin_models"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/analytics_fin_report_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "accounting_entries"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/analytics_invest_report_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "company_profile",
+        "investments"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/analytics_margin_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cogs_register",
+        "company_profile",
+        "nomenklatura",
+        "sale_item_cogs",
+        "sales_items"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/analytics_sales_report_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "batch_consumptions",
+        "business_events",
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs",
+        "sales",
+        "sales_items",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/company_hr_controls_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "companies",
+        "company_profile",
+        "employees",
+        "roles",
+        "staff_schedule"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/company_org_structure_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "companies",
+        "company_profile",
+        "employees",
+        "roles",
+        "users"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/expense_categories_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "budget_projects",
+        "company_profile",
+        "statRashod"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/expense_plan_fact_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "company_branches",
+        "company_profile",
+        "expense_plans"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/money_company_expenses_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "business_events",
+        "company_expenses",
+        "company_profile",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/money_company_money_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "accounting_entries",
+        "company_profile"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/money_my_expenses_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "company_profile"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/money_my_money_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "budget_projects",
+        "company_profile",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/nomenclature_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "batches",
+        "companies",
+        "company_profile",
+        "funding_requests",
+        "inventory_batches",
+        "items",
+        "nomenclature_categories",
+        "nomenklatura",
+        "tranzaction",
+        "warehouse_movements",
+        "warehouses"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/obligations_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "company_profile",
+        "debt_payment_links",
+        "debt_register",
+        "obyaz"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/product_portfolio_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cogs_register",
+        "company_profile",
+        "inventory_batches",
+        "nomenklatura",
+        "sale_item_cogs",
+        "sales_items"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_abc_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs",
+        "sales_items"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_cash_mode_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cash_registers",
+        "clients",
+        "cogs_register",
+        "company_profile",
+        "debt_register",
+        "nomenklatura",
+        "sale_item_cogs",
+        "sales",
+        "services",
+        "staff_schedule",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_cash_registers_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cash_registers",
+        "cashiers",
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs",
+        "sales",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_cashier_reports_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cashiers",
+        "cogs_register",
+        "company_profile",
+        "employees",
+        "sale_item_cogs",
+        "sales",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_cashiers_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "activity_log",
+        "cashiers",
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs",
+        "sales",
+        "shops",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_clients_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "activity_log",
+        "clients",
+        "cogs_register",
+        "company_profile",
+        "debt_payment_links",
+        "debt_register",
+        "sale_item_cogs",
+        "sales",
+        "sales_items",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_cogs_breakdown_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_controls_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cogs_register",
+        "company_profile",
+        "inventory_batches",
+        "nomenklatura",
+        "sale_item_cogs",
+        "sales_items",
+        "warehouses"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_expenses_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs",
+        "sales",
+        "shop_expenses",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_income_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs",
+        "sales",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_orders_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "clients",
+        "customer_orders",
+        "inventory_reservations",
+        "nomenklatura"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_profit_cashier_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs",
+        "sales",
+        "sales_items",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_profit_shop_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "cash_register_incassations",
+        "cash_registers",
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs",
+        "sales",
+        "shop_expenses",
+        "shops",
+        "tranzaction"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/sales_shops_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "activity_log",
+        "cash_register_incassations",
+        "cash_registers",
+        "cogs_register",
+        "company_profile",
+        "roles",
+        "sale_item_cogs",
+        "sales",
+        "shop_expenses",
+        "shops",
+        "tranzaction",
+        "warehouses"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/security_bloc_apps_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "blocked_apps",
+        "companies",
+        "device_commands",
+        "devices",
+        "employees",
+        "security_logs",
+        "security_pins",
+        "security_settings",
+        "users"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/security_delete_data_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "admin_notifications",
+        "data_delete_requests"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/security_recovery_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "admin_notifications",
+        "data_restore_requests"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/service_reports_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "business_events",
+        "company_profile",
+        "service_executions"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/services_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "company_profile",
+        "service_categories",
+        "service_cost_models",
+        "service_executions",
+        "services"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/settings_calculator_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/settings_nalogi_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "company_profile",
+        "taxes"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/settings_rekviziti_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "companies",
+        "company_profile"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/settings_roles_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "companies",
+        "employees",
+        "roles",
+        "users"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/settings_valuta_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "company_profile",
+        "valuta"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/suppliers_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "company_profile",
+        "suppliers"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/custom_code/widgets/warehouse_widget.dart",
+      "route": null,
+      "models": [],
+      "direct_collections": [
+        "business_events",
+        "company_profile",
+        "inventory_batches",
+        "inventory_reservations",
+        "nomenklatura",
+        "tranzaction",
+        "warehouse_movements",
+        "warehouses"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/audit_1c/audit_1c_widget.dart",
+      "route": "audit1C",
+      "models": [],
+      "direct_collections": [
+        "audit_1c_runs",
+        "audit_1c_sync_settings",
+        "company_profile"
+      ],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/balance/balance_widget.dart",
+      "route": "balance",
+      "models": [
+        "lib/money/balance/balance_model.dart"
+      ],
+      "direct_collections": [
+        "balance_manual_values",
+        "cogs_register",
+        "company_profile",
+        "debt_payment_links",
+        "debt_register",
+        "inventory_batches",
+        "obyaz",
+        "sale_item_cogs",
+        "tranzaction"
+      ],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/component/add_tranzaction/add_tranzaction_widget.dart",
+      "route": null,
+      "models": [
+        "lib/money/component/add_tranzaction/add_tranzaction_model.dart"
+      ],
+      "direct_collections": [
+        "company_branches",
+        "company_profile",
+        "funding_requests",
+        "obyaz",
+        "valuta"
+      ],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/funding_requests/funding_requests_widget.dart",
+      "route": "fundingRequests",
+      "models": [],
+      "direct_collections": [
+        "budget_projects",
+        "company_branches",
+        "funding_request_categories",
+        "funding_requests"
+      ],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/obyaz/obyaz_widget.dart",
+      "route": "obyaz",
+      "models": [
+        "lib/money/obyaz/obyaz_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/scheta/scheta_widget.dart",
+      "route": "scheta",
+      "models": [
+        "lib/money/scheta/scheta_model.dart"
+      ],
+      "direct_collections": [
+        "accounting_entries",
+        "companies",
+        "company_profile",
+        "statRashod"
+      ],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/stat_ras/stat_ras_widget.dart",
+      "route": "statRas",
+      "models": [
+        "lib/money/stat_ras/stat_ras_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/tranzaction/tranzaction_journal_widget.dart",
+      "route": "tranzactionJournal",
+      "models": [
+        "lib/money/tranzaction/tranzaction_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/tranzaction/tranzaction_widget.dart",
+      "route": "tranzaction",
+      "models": [
+        "lib/money/tranzaction/tranzaction_model.dart"
+      ],
+      "direct_collections": [
+        "company_profile"
+      ],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/money/uchet/uchet_widget.dart",
+      "route": "uchet",
+      "models": [
+        "lib/money/uchet/uchet_model.dart"
+      ],
+      "direct_collections": [
+        "audit_1c_runs",
+        "cogs_register",
+        "company_profile",
+        "sale_item_cogs"
+      ],
+      "target_module": "cash-bank/accounting",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/my_maney/my_decome/my_decome_widget.dart",
+      "route": "myDecome",
+      "models": [
+        "lib/my_maney/my_decome/my_decome_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/my_maney/my_decome_comp/my_decome_comp_widget.dart",
+      "route": "myDecomeComp",
+      "models": [
+        "lib/my_maney/my_decome_comp/my_decome_comp_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/my_maney/my_money/my_money_widget.dart",
+      "route": "myMoney",
+      "models": [
+        "lib/my_maney/my_money/my_money_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/my_maney/my_money_comp/my_money_comp_widget.dart",
+      "route": "myMoneyComp",
+      "models": [
+        "lib/my_maney/my_money_comp/my_money_comp_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/product/controls_sale/controls_sale_widget.dart",
+      "route": "controlsSale",
+      "models": [
+        "lib/product/controls_sale/controls_sale_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "inventory",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/product/kontr_agent/kontr_agent_widget.dart",
+      "route": "kontrAgent",
+      "models": [
+        "lib/product/kontr_agent/kontr_agent_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "inventory",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/product/port_product/port_product_widget.dart",
+      "route": "PortProduct",
+      "models": [
+        "lib/product/port_product/port_product_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "inventory",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/product/sclad/sclad_widget.dart",
+      "route": "sclad",
+      "models": [
+        "lib/product/sclad/sclad_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "inventory",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/product/tovar/tovar_widget.dart",
+      "route": "tovar",
+      "models": [
+        "lib/product/tovar/tovar_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "inventory",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/product/uslugi/uslugi_widget.dart",
+      "route": "uslugi",
+      "models": [
+        "lib/product/uslugi/uslugi_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "inventory",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/abc_page_sale/abc_page_sale_widget.dart",
+      "route": "abcPageSale",
+      "models": [
+        "lib/sale/abc_page_sale/abc_page_sale_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/client/client_widget.dart",
+      "route": "client",
+      "models": [
+        "lib/sale/client/client_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/controls_sales/controls_sales_widget.dart",
+      "route": "controlsSales",
+      "models": [
+        "lib/sale/controls_sales/controls_sales_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/decome_shop/decome_shop_widget.dart",
+      "route": "decomeShop",
+      "models": [
+        "lib/sale/decome_shop/decome_shop_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/income_shop/income_shop_widget.dart",
+      "route": "incomeShop",
+      "models": [
+        "lib/sale/income_shop/income_shop_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/pribil_kassir/pribil_kassir_widget.dart",
+      "route": "pribilKassir",
+      "models": [
+        "lib/sale/pribil_kassir/pribil_kassir_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/pribil_shop/pribil_shop_widget.dart",
+      "route": "pribilShop",
+      "models": [
+        "lib/sale/pribil_shop/pribil_shop_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/receivables/receivables_widget.dart",
+      "route": "receivables",
+      "models": [],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/sale/shop/shop_widget.dart",
+      "route": "shop",
+      "models": [
+        "lib/sale/shop/shop_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "sales",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/secruriti/bloc_apps/bloc_apps_widget.dart",
+      "route": "blocApps",
+      "models": [
+        "lib/secruriti/bloc_apps/bloc_apps_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/secruriti/delete_data/delete_data_widget.dart",
+      "route": "deleteData",
+      "models": [
+        "lib/secruriti/delete_data/delete_data_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/secruriti/recovery/recovery_widget.dart",
+      "route": "recovery",
+      "models": [
+        "lib/secruriti/recovery/recovery_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/setting/calculat/calculat_widget.dart",
+      "route": "calculat",
+      "models": [
+        "lib/setting/calculat/calculat_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/setting/nalogi/nalogi_widget.dart",
+      "route": "nalogi",
+      "models": [
+        "lib/setting/nalogi/nalogi_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/setting/rekviziti/rekviziti_widget.dart",
+      "route": "rekviziti",
+      "models": [
+        "lib/setting/rekviziti/rekviziti_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/setting/roli/roli_widget.dart",
+      "route": "roli",
+      "models": [
+        "lib/setting/roli/roli_model.dart"
+      ],
+      "direct_collections": [
+        "roles"
+      ],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    },
+    {
+      "screen": "lib/setting/valuta/valuta_widget.dart",
+      "route": "valuta",
+      "models": [
+        "lib/setting/valuta/valuta_model.dart"
+      ],
+      "direct_collections": [],
+      "target_module": "organizations/shared",
+      "new_api": null,
+      "status": "not_migrated",
+      "verification_scenario": "Real API binding and widget/E2E tests pending"
+    }
+  ]
+}

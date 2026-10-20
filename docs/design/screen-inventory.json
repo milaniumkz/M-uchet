@@ -1,0 +1,192 @@
+[
+  {
+    "id": "D-01",
+    "title": "Бизнес под контролем",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-02",
+    "title": "Вход",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-03",
+    "title": "Восстановление доступа",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-04",
+    "title": "Настроим учёт под ваш бизнес",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-05",
+    "title": "Документы продаж",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-06",
+    "title": "Новый счёт на оплату",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-07",
+    "title": "Счёт № 024",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-08",
+    "title": "Акт выполненных работ № 019",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-09",
+    "title": "Накладная № 014",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-10",
+    "title": "Электронный счёт-фактура",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-11",
+    "title": "Покупки и расходы",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-12",
+    "title": "Загрузить банковскую выписку",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-13",
+    "title": "Сопоставить операции",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-14",
+    "title": "Касса",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-15",
+    "title": "Контрагенты",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-16",
+    "title": "ТОО «Алатау Сервис»",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-17",
+    "title": "Товары и услуги",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-18",
+    "title": "Складские остатки",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-19",
+    "title": "Сотрудники",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-20",
+    "title": "Расчёт зарплаты",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-21",
+    "title": "Основные средства",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-22",
+    "title": "Налоговый календарь",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-23",
+    "title": "Подготовить отчёт",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-24",
+    "title": "Проверка перед формированием",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-25",
+    "title": "Финансовые отчёты",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-26",
+    "title": "Бухгалтерские записи",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-27",
+    "title": "Закрытие месяца",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-28",
+    "title": "Настройки компании",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-29",
+    "title": "Интеграции",
+    "platform": "desktop"
+  },
+  {
+    "id": "D-30",
+    "title": "Поможем разобраться",
+    "platform": "desktop"
+  },
+  {
+    "id": "M-01",
+    "title": "Главная в кармане",
+    "platform": "mobile"
+  },
+  {
+    "id": "M-02",
+    "title": "Документы без таблиц",
+    "platform": "mobile"
+  },
+  {
+    "id": "M-03",
+    "title": "Создание счёта по шагам",
+    "platform": "mobile"
+  },
+  {
+    "id": "M-04",
+    "title": "Документ и его история",
+    "platform": "mobile"
+  },
+  {
+    "id": "M-05",
+    "title": "Проверка платежа",
+    "platform": "mobile"
+  },
+  {
+    "id": "M-06",
+    "title": "Налоги без тревоги",
+    "platform": "mobile"
+  },
+  {
+    "id": "M-07",
+    "title": "От цифры к документу",
+    "platform": "mobile"
+  },
+  {
+    "id": "M-08",
+    "title": "Всё остальное рядом",
+    "platform": "mobile"
+  }
+]

@@ -1,15 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../src/app.js';
+import { transaction } from '../src/db.js';
+import { accountReference } from '../src/legal.js';
 
+const testSchema = () => 'test_' + randomUUID().replaceAll('-', '');
+test('2026 account reference cannot silently apply the published future 2027 version',()=>{
+ const chart=accountReference('2026-12-31');
+ assert.equal(chart.accounts.find(a=>a.code==='1010').name,'Денежные средства в кассе');
+ assert.throws(()=>accountReference('2027-01-01'),error=>error.statusCode===422);
+ assert.throws(()=>accountReference('2025-12-31'),error=>error.statusCode===422);
+});
 async function fixture(t, overrides = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'm-uchet-'));
-  const app = await createApp({ dataDir, allowRegistration: true, ...overrides });
-  t.after(async () => { await app.close(); await rm(dataDir, { recursive: true, force: true }); });
+  const app = await createApp({ dataDir, schema: testSchema(), allowRegistration: true, ...overrides });
+  t.after(async () => { await app.db.exec(`DROP SCHEMA "${app.db.schema}" CASCADE`); await app.close(); await rm(dataDir, { recursive: true, force: true }); });
   async function call(method, url, payload, token, key) {
     const response = await app.inject({ method, url, payload,
       headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(key ? { 'idempotency-key': key } : {}) } });
@@ -38,8 +47,8 @@ async function fixture(t, overrides = {}) {
 
 test('registration is closed by default, health does not require a session', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'm-uchet-closed-'));
-  const app = await createApp({ dataDir: directory, allowRegistration: false });
-  t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+  const app = await createApp({ dataDir: directory, schema: testSchema(), allowRegistration: false });
+  t.after(async () => { await app.db.exec(`DROP SCHEMA "${app.db.schema}" CASCADE`); await app.close(); await rm(directory, { recursive: true, force: true }); });
   assert.equal((await app.inject('/health')).json().status, 'ok');
   assert.equal((await app.inject({ method: 'POST', url: '/v1/auth/register', payload: { login: 'x' } })).statusCode, 403);
   assert.equal((await app.inject('/v1/companies')).statusCode, 401);
@@ -147,8 +156,8 @@ test('failed reservation rolls back earlier lines and audit/idempotency records'
   assert.equal(result.status, 409);
   assert.equal((await f.api('GET', '/inventory')).body.items[0].reserved, 0);
   assert.equal((await f.api('GET', `/orders/${order.body.id}`)).body.status, 'NEW');
-  assert.equal(f.app.db.prepare('SELECT count(*) AS n FROM reservations').get().n, 0);
-  assert.equal(f.app.db.prepare("SELECT count(*) AS n FROM audit WHERE action='order.reserve'").get().n, 0);
+  assert.equal((await f.app.db.prepare('SELECT count(*) AS n FROM reservations').get()).n, 0);
+  assert.equal((await f.app.db.prepare("SELECT count(*) AS n FROM audit WHERE action='order.reserve'").get()).n, 0);
 });
 
 test('reservations prevent overselling and cancellation releases stock', async t => {
@@ -199,14 +208,197 @@ test('files require company membership and are served as attachments', async t =
 });
 
 test('database and migrations survive close/reopen without losing data', async t => {
+  const schema = testSchema();
   const directory = await mkdtemp(join(tmpdir(), 'm-uchet-restart-'));
   let app;
-  t.after(async () => { if (app) await app.close(); await rm(directory, { recursive: true, force: true }); });
-  app = await createApp({ dataDir: directory, allowRegistration: true });
+  t.after(async () => { if (app) await app.db.exec(`DROP SCHEMA "${app.db.schema}" CASCADE`); await app.close(); await rm(directory, { recursive: true, force: true }); });
+  app = await createApp({ dataDir: directory, schema, allowRegistration: true });
   await app.inject({ method: 'POST', url: '/v1/auth/register', payload: { login: 'persistent', name: 'Persist', password: 'persistent-password' } });
   await app.close(); app = undefined;
-  app = await createApp({ dataDir: directory });
+  app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal(app.db.prepare('SELECT count(*) AS n FROM schema_versions').get().n, 1);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 6);
+});
+
+test('wallet transfers and debt settlements are atomic and idempotent', async t => {
+  const f = await fixture(t);
+  const one = (await f.api('POST', '/wallets', { name: 'Cash' })).body;
+  const two = (await f.api('POST', '/wallets', { name: 'Bank' })).body;
+  assert.ok(one.id); assert.ok(two.id);
+  assert.equal((await f.api('POST', `/wallets/${one.id}/transactions`, { type: 'CAPITAL', amount: 1000, description: 'Opening capital' })).status, 200);
+  const transfer = { sourceWalletId: one.id, targetWalletId: two.id, amount: 400 }, key = randomUUID();
+  assert.equal((await f.api('POST', '/wallet-transfers', transfer, key)).status, 200);
+  assert.equal((await f.api('POST', '/wallet-transfers', transfer, key)).status, 200);
+  assert.equal((await f.api('POST', '/wallet-transfers', { ...transfer, amount: 800 })).status, 409);
+  const balances = (await f.api('GET', '/wallets')).body.items;
+  assert.equal(balances.find(w => w.id === one.id).balance, 600);
+  assert.equal(balances.find(w => w.id === two.id).balance, 400);
+  const client = (await f.api('POST', '/resources/clients', { data: { name: 'Synthetic client' } })).body;
+  const debt = await f.api('POST', '/debts', { type: 'AR', counterpartyId: client.id, amount: 500, dueDate: '2026-10-31' });
+  assert.equal(debt.status, 200);
+  const paid = await f.api('POST', `/debts/${debt.body.id}/settlements`, { walletId: two.id, amount: 300 });
+  assert.equal(paid.status, 200); assert.equal(paid.body.remaining, 200);
+  assert.equal((await f.api('POST', `/debts/${debt.body.id}/settlements`, { walletId: two.id, amount: 300 })).status, 409);
+  assert.equal((await f.api('GET', `/debts/${debt.body.id}/payments`)).body.items.length, 1);
+});
+
+test('stock transfers preserve cost; writeoffs cannot consume reserved units', async t => {
+  const f = await fixture(t), refs = await f.catalog();
+  const target = (await f.api('POST', '/resources/warehouses', { data: { name: 'Target' } })).body;
+  await f.api('POST', '/inventory/receipts', { ...refs, quantity: 10, unitCost: 125 });
+  const move = await f.api('POST', '/inventory/movements', { productId: refs.productId, sourceWarehouseId: refs.warehouseId, targetWarehouseId: target.id, quantity: 4 });
+  assert.equal(move.status, 200); assert.equal(move.body.cost, 500);
+  const order = (await f.api('POST', '/orders', { items: [{ ...refs, quantity: 5, unitPrice: 200 }] })).body;
+  await f.api('POST', `/orders/${order.id}/reserve`);
+  assert.equal((await f.api('POST', '/inventory/writeoffs', { ...refs, quantity: 2, reason: 'Damaged' })).status, 409);
+  const written = await f.api('POST', '/inventory/writeoffs', { ...refs, quantity: 1, reason: 'Damaged' });
+  assert.equal(written.status, 200); assert.equal(written.body.cost, 125);
+  const rows = (await f.api('GET', '/inventory')).body.items;
+  assert.equal(rows.reduce((sum, b) => sum + b.quantity, 0), 9);
+  assert.equal(rows.reduce((sum, b) => sum + b.quantity * b.unit_cost, 0), 1125);
+});
+
+test('cash shifts and device command transitions cannot execute twice', async t => {
+  const f = await fixture(t);
+  const wallet = (await f.api('POST', '/wallets', { name: 'Cash' })).body;
+  const shift = await f.api('POST', '/shifts', { walletId: wallet.id }); assert.equal(shift.status, 200);
+  assert.equal((await f.api('POST', '/shifts', { walletId: wallet.id })).status, 409);
+  assert.equal((await f.api('POST', `/shifts/${shift.body.id}/close`, { countedAmount: 0 })).status, 200);
+  assert.equal((await f.api('POST', `/shifts/${shift.body.id}/close`, { countedAmount: 0 })).status, 409);
+  const device = (await f.api('POST', '/resources/devices', { data: { name: 'Test terminal' } })).body;
+  const cmd = await f.api('POST', `/devices/${device.id}/commands`, { command: 'SYNC' }); assert.equal(cmd.status, 200);
+  assert.equal((await f.api('POST', `/devices/${device.id}/commands/${cmd.body.id}/acknowledge`, { status: 'SUCCEEDED' })).status, 200);
+  assert.equal((await f.api('POST', `/devices/${device.id}/commands/${cmd.body.id}/acknowledge`, { status: 'SUCCEEDED' })).status, 409);
+});
+
+test('manual reversal preserves history and restores balanced trial balance', async t => {
+  const f = await fixture(t);
+  const entry = await f.api('POST', '/accounting/journal', { description: 'Opening', lines: [{ account: 'cash', debit: 123 }, { account: 'capital', credit: 123 }] });
+  assert.equal(entry.status, 200);
+  assert.equal((await f.api('POST', `/accounting/journal/${entry.body.id}/reverse`, { reason: 'Correction' })).status, 200);
+  assert.equal((await f.api('POST', `/accounting/journal/${entry.body.id}/reverse`, { reason: 'Again' })).status, 409);
+  const report = (await f.api('GET', '/accounting/trial-balance')).body;
+  assert.ok(report.accounts.every(a => a.balance === 0));
+  assert.equal((await f.api('GET', '/accounting/journal')).body.items.length, 2);
+});
+
+test('closed periods remain editable on owner request; replay preserves history', async t => {
+  const f=await fixture(t), key=randomUUID();
+  const payload={businessDate:'2026-03-10',description:'Synthetic historical opening',lines:[{account:'cash',debit:123},{account:'capital',credit:123}]};
+  const first=await f.api('POST','/accounting/journal',payload,key);assert.equal(first.status,200);
+  assert.equal((await f.api('POST','/periods/2026-03/close',{reason:'Synthetic close'})).status,200);
+  assert.deepEqual((await f.api('POST','/accounting/journal',payload,key)).body,first.body);
+  assert.equal((await f.api('POST','/accounting/journal',payload)).status,200);
+  assert.equal((await f.api('POST','/periods/2026-03/reopen',{reason:'Controlled correction'})).status,200);
+  assert.equal((await f.api('POST','/accounting/journal',payload)).status,200);
+});
+
+test('PostgreSQL rejects unbalanced entries and records history for edits',async t=>{
+ const f=await fixture(t);
+ await assert.rejects(transaction(f.app.db,async()=>{
+  await f.app.db.prepare('INSERT INTO journal(id,company_id,scope,currency,description,lines,created_at,business_date) VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(),f.company.id,'ACCOUNTING','KZT','Invalid','[]',new Date().toISOString(),'2026-03-10');
+ }),error=>error.code==='23514');
+ const posted=await f.api('POST','/accounting/journal',{description:'Immutable',lines:[{account:'cash',debit:1},{account:'capital',credit:1}]});
+ await f.app.db.prepare('UPDATE journal SET description=? WHERE id=?').run('Audited edit',posted.body.id);
+ assert.equal((await f.app.db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(posted.body.id)).n,1);
+ await assert.rejects(f.app.db.prepare('INSERT INTO journal_lines VALUES(?,?,?,?,?)').run(posted.body.id,2,'cash',1,0),error=>error.code==='23514');
+});
+
+test('concurrent API instances deduplicate the same receipt through PostgreSQL locks',async t=>{
+ const f=await fixture(t),refs=await f.catalog(),key=randomUUID();
+ const second=await createApp({schema:f.app.db.schema,dataDir:f.dataDir});t.after(()=>second.close());
+ const request={method:'POST',url:f.prefix+'/inventory/receipts',payload:{...refs,quantity:7,unitCost:10},headers:{authorization:`Bearer ${f.owner.token}`,'idempotency-key':key}};
+ const results=await Promise.all([f.app.inject(request),second.inject(request)]);
+ assert.deepEqual(results.map(r=>r.statusCode),[200,200]);assert.deepEqual(results[0].json(),results[1].json());
+ assert.equal((await f.api('GET','/inventory')).body.items.length,1);
+});
+
+
+test('owner can edit a posted journal and wallet balance after closing the period',async t=>{
+ const f=await fixture(t);
+ const posted=await f.api('POST','/accounting/journal',{businessDate:'2026-03-10',description:'Original',lines:[{account:'cash',debit:100},{account:'capital',credit:100}]});
+ await f.api('POST','/periods/2026-03/close',{reason:'Close'});
+ const changed=await f.api('PUT',`/accounting/journal/${posted.body.id}`,{businessDate:'2026-03-10',description:'Edited',lines:[{account:'cash',debit:250},{account:'capital',credit:250}]});
+ assert.equal(changed.status,200);assert.equal(changed.body.id,posted.body.id);
+ const history=await f.api('GET',`/accounting/journal/${posted.body.id}/history`);assert.equal(history.body.items.length,1);assert.equal(history.body.items[0].snapshot.description,'Manual: Original');
+ const wallet=(await f.api('POST','/wallets',{name:'Before'})).body;
+ const edit=await f.api('PUT',`/wallets/${wallet.id}`,{name:'After',balance:1000});assert.equal(edit.status,200);assert.equal(edit.body.balance,1000);
+ assert.equal((await f.api('GET',`/wallets/${wallet.id}/entries`)).body.items[0].kind,'BALANCE_EDIT');
+});
+
+test('owner can edit a closed paid sale; stock, COGS, revenue and customer credit reconcile',async t=>{
+ const f=await fixture(t),refs=await f.catalog();
+ await f.api('POST','/inventory/receipts',{...refs,quantity:10,unitCost:100});
+ const order=(await f.api('POST','/orders',{items:[{...refs,quantity:4,unitPrice:200}]})).body;
+ await f.api('POST',`/orders/${order.id}/reserve`);await f.api('POST',`/orders/${order.id}/ship`);await f.api('POST',`/orders/${order.id}/payments`,{amount:800});
+ const edit=await f.api('PUT',`/orders/${order.id}`,{items:[{...refs,quantity:3,unitPrice:200}]});
+ assert.equal(edit.status,200);assert.equal(edit.body.status,'CLOSED');assert.equal(edit.body.customerCredit,200);
+ assert.equal((await f.api('GET','/inventory')).body.items[0].quantity,7);
+ const report=(await f.api('GET','/accounting/trial-balance')).body.accounts;
+ assert.equal(report.find(a=>a.account==='revenue').balance,-600);assert.equal(report.find(a=>a.account==='cogs').balance,300);
+ assert.equal(report.find(a=>a.account==='customer_advances').balance,-200);assert.equal(report.reduce((sum,a)=>sum+a.balance,0),0);
+ assert.equal((await f.api('GET',`/orders/${order.id}/history`)).body.items.length,1);
+ const bad=await f.api('PUT',`/orders/${order.id}`,{items:[{...refs,quantity:11,unitPrice:200}]});assert.equal(bad.status,409);
+ assert.equal((await f.api('GET','/inventory')).body.items[0].quantity,7);
+});
+
+test('dynamic projects reconcile with company totals and reject foreign project references', async t => {
+  const f=await fixture(t);
+  const a=await f.api('POST','/projects',{name:'Произвольный проект'});
+  const b=await f.api('POST','/projects',{name:'Другой продукт'});
+  assert.equal(a.status,200);assert.equal(b.status,200);
+  const wallet=await f.api('POST','/wallets',{name:'Общий кошелёк'});
+  for(const [type,amount,projectId] of [['INCOME',10000,a.body.id],['EXPENSE',3000,a.body.id],['INCOME',2000,b.body.id],['EXPENSE',5000,b.body.id],['EXPENSE',1000,null]]){
+    assert.equal((await f.api('POST',`/wallets/${wallet.body.id}/transactions`,{type,amount,projectId,description:'Операция'})).status,200);
+  }
+  const report=await f.api('GET','/reports/projects');
+  assert.equal(report.status,200);
+  assert.equal(report.body.items.find(p=>p.projectId===a.body.id).netProfit,7000);
+  assert.equal(report.body.items.find(p=>p.projectId===b.body.id).netProfit,-3000);
+  assert.equal(report.body.items.find(p=>p.projectId===null).netProfit,-1000);
+  assert.equal(report.body.total.netProfit,3000);
+  assert.equal((await f.api('GET','/reports/profit-loss')).body.netProfit,3000);
+  const outsider=await f.user('outsider-project@example.test');
+  const other=await f.call('POST','/v1/companies',{name:'Other',currency:'KZT'},outsider.token);
+  const foreign=await f.call('POST',`/v1/companies/${other.body.id}/projects`,{name:'Чужой'},outsider.token,randomUUID());
+  assert.equal((await f.api('POST',`/wallets/${wallet.body.id}/transactions`,{type:'INCOME',amount:1,projectId:foreign.body.id,description:'Denied'})).status,404);
+  const rename=await f.api('PUT',`/projects/${a.body.id}`,{version:1,name:'Новое название',archived:true});
+  assert.equal(rename.status,200);
+  assert.equal((await f.api('GET',`/reports/projects?projectId=${a.body.id}`)).body.items[0].netProfit,7000);
+});
+
+test('a paid sale can move between projects without duplicating company profit',async t=>{
+ const f=await fixture(t),refs=await f.catalog();
+ const a=(await f.api('POST','/projects',{name:'Первый'})).body;
+ const b=(await f.api('POST','/projects',{name:'Второй'})).body;
+ await f.api('POST','/inventory/receipts',{...refs,quantity:10,unitCost:100});
+ const order=(await f.api('POST','/orders',{projectId:a.id,items:[{...refs,quantity:4,unitPrice:200}]})).body;
+ for(const action of ['reserve','ship'])assert.equal((await f.api('POST',`/orders/${order.id}/${action}`,{})).status,200);
+ await f.api('POST',`/orders/${order.id}/payments`,{amount:800});
+ const before=(await f.api('GET','/reports/projects')).body;
+ assert.equal(before.items.find(p=>p.projectId===a.id).netProfit,400);
+ const edited=await f.api('PUT',`/orders/${order.id}`,{projectId:b.id});
+ assert.equal(edited.status,200);assert.equal(edited.body.status,'CLOSED');
+ const after=(await f.api('GET','/reports/projects')).body;
+ assert.equal(after.items.find(p=>p.projectId===a.id).netProfit,0);
+ assert.equal(after.items.find(p=>p.projectId===b.id).netProfit,400);
+ assert.equal((await f.api('GET',`/orders?projectId=${a.id}`)).body.items.length,0);
+ assert.equal((await f.api('GET',`/orders?projectId=${b.id}`)).body.items[0].id,order.id);
+ assert.ok((await f.api('GET',`/accounting/journal?projectId=${b.id}`)).body.items.every(j=>j.project_id===b.id));
+ assert.deepEqual(after.total,before.total);
+ assert.equal((await f.api('GET','/inventory')).body.items[0].quantity,6);
+});
+
+
+test('same-origin web assets do not bypass API auth or expose dotfiles',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'muchet-web-'));
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ await writeFile(join(root,'index.html'),'<html><title>SYNTHETIC WEB FIXTURE</title></html>');
+ await writeFile(join(root,'.env'),'SYNTHETIC PRIVATE FILE');
+ const f=await fixture(t,{webRoot:root});
+ const page=await f.app.inject('/');assert.equal(page.statusCode,200);assert.match(page.body,/SYNTHETIC WEB FIXTURE/);
+ assert.equal((await f.app.inject('/v1/companies')).statusCode,401);
+ assert.equal((await f.app.inject('/.env')).statusCode,403);
+ assert.ok([403,404].includes((await f.app.inject('/%2e%2e/.env')).statusCode));
 });

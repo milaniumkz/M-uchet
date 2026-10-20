@@ -1,11 +1,11 @@
 {
-  "name": "UchetSD",
-  "short_name": "UchetSD",
+  "name": "М-учёт",
+  "short_name": "М-учёт",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FFFBF5",
-  "theme_color": "#C9A15B",
-  "description": "UchetSD web app",
+  "background_color": "#F5F7FB",
+  "theme_color": "#5654E8",
+  "description": "Бухгалтерия и проекты компании",
   "orientation": "portrait-primary",
   "prefer_related_applications": false,
   "icons": [

@@ -1,0 +1,93 @@
+{
+  "catalog_complete": false,
+  "status": "initial_research_candidates_not_legal_advice",
+  "forms": [
+    {
+      "code": "100.00",
+      "conditions_to_research": "Соответствующие плательщики КПН; применимость не подтверждена",
+      "version": null,
+      "period": null,
+      "source_ids": [
+        "V2500037390"
+      ],
+      "calculation": "blocked",
+      "official_file": "blocked",
+      "submission": "not_connected",
+      "blocker": "Не проверены редакция, приложения, контрольные соотношения и официальный формат. Нулевой отчёт не формируется."
+    },
+    {
+      "code": "220.00",
+      "conditions_to_research": "Предпринимательский ИПН ИП на ОУР; применимость не подтверждена",
+      "version": null,
+      "period": null,
+      "source_ids": [
+        "V2500037390"
+      ],
+      "calculation": "blocked",
+      "official_file": "blocked",
+      "submission": "not_connected",
+      "blocker": "Не проверены редакция, приложения, контрольные соотношения и официальный формат. Нулевой отчёт не формируется."
+    },
+    {
+      "code": "200.00",
+      "conditions_to_research": "Налоговый агент, работники и социальные платежи; применимость не подтверждена",
+      "version": null,
+      "period": null,
+      "source_ids": [
+        "V2500037390"
+      ],
+      "calculation": "blocked",
+      "official_file": "blocked",
+      "submission": "not_connected",
+      "blocker": "Не проверены редакция, приложения, контрольные соотношения и официальный формат. Нулевой отчёт не формируется."
+    },
+    {
+      "code": "300.00",
+      "conditions_to_research": "Применимые обязательства по НДС; применимость не подтверждена",
+      "version": null,
+      "period": null,
+      "source_ids": [
+        "V2500037390"
+      ],
+      "calculation": "blocked",
+      "official_file": "blocked",
+      "submission": "not_connected",
+      "blocker": "Не проверены редакция, приложения, контрольные соотношения и официальный формат. Нулевой отчёт не формируется."
+    },
+    {
+      "code": "910.00",
+      "conditions_to_research": "Допустимый СНР по упрощённой декларации; применимость не подтверждена",
+      "version": null,
+      "period": null,
+      "source_ids": [
+        "V2500037390"
+      ],
+      "calculation": "blocked",
+      "official_file": "blocked",
+      "submission": "not_connected",
+      "blocker": "Не проверены редакция, приложения, контрольные соотношения и официальный формат. Нулевой отчёт не формируется."
+    },
+    {
+      "code": "328.00",
+      "conditions_to_research": "Соответствующий импорт из ЕАЭС; применимость не подтверждена",
+      "version": null,
+      "period": null,
+      "source_ids": [
+        "V2500037237"
+      ],
+      "calculation": "blocked",
+      "official_file": "blocked",
+      "submission": "not_connected",
+      "blocker": "Не проверены редакция, приложения, контрольные соотношения и официальный формат. Нулевой отчёт не формируется."
+    }
+  ],
+  "unresolved_categories": [
+    "имущество",
+    "земля",
+    "транспорт",
+    "личное декларирование",
+    "специальные отрасли",
+    "статистическая отчетность",
+    "финансовая отчетность по применимому стандарту"
+  ]
+}

@@ -25,7 +25,6 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
   final scaffoldKey = GlobalKey<ScaffoldState>();
   bool _loading = true;
   String _companyId = '';
-  bool _locked = false;
   int _companiesCount = 0;
   int _accountsCount = 0;
   int _warehousesCount = 0;
@@ -153,12 +152,6 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
         return;
       }
 
-      final companySnap = await FirebaseFirestore.instance
-          .collection('companies')
-          .doc(_companyId)
-          .get();
-      final companyData = companySnap.data() ?? {};
-      _locked = companyData['data_locked'] == true;
       _onboardingComplete =
           currentUserDocument?.snapshotData['onboarding_complete'] == true;
       final skippedRaw =
@@ -283,13 +276,6 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
       }
     }
 
-    if (_locked && !_onboardingComplete && currentUserReference != null) {
-      await currentUserReference!
-          .update({'onboarding_complete': true, 'data_locked': true});
-      if (mounted) {
-        setState(() => _onboardingComplete = true);
-      }
-    }
     _tryAutoOpenRequestedStep();
   }
 
@@ -517,9 +503,6 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
       'products': _productsCount > 0,
       'budgets': _budgetsCount > 0,
     };
-    final lockedSteps = <String, bool>{
-      for (final entry in stepsByData.entries) entry.key: entry.value,
-    };
     final unlockedTitles = _unfilledSkippedStepTitles;
     final unlockedHint = unlockedTitles.isEmpty
         ? 'Незаполненные блоки можно заполнить позже.'
@@ -530,7 +513,7 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
         return AlertDialog(
           title: const Text('Завершить первый вход'),
           content: Text(
-            'После завершения будут заблокированы только заполненные блоки. $unlockedHint Продолжить?',
+            'Редактирование всех блоков останется доступным. $unlockedHint Завершить первый вход?',
           ),
           actions: [
             TextButton(
@@ -552,22 +535,18 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
         .collection('companies')
         .doc(_companyId)
         .set({
-      'data_locked': true,
-      'locked_steps': lockedSteps,
-      'lockedAt': FieldValue.serverTimestamp(),
+      'onboarding_complete': true,
+      'onboarding_completed_at': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
     if (mounted) {
       setState(() {
-        _locked = true;
         _onboardingComplete = true;
       });
     }
     if (currentUserReference != null) {
       await currentUserReference!.update({
         'onboarding_complete': true,
-        'data_locked': true,
-        'onboarding_locked_steps': lockedSteps,
         'onboarding_steps': stepsByData,
       });
     }
@@ -664,7 +643,6 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
 
   Future<void> _ensureDefaultFirstEntryData() async {
     if (_companyId.isEmpty || currentUserUid.isEmpty) return;
-    if (_locked) return;
 
     final db = FirebaseFirestore.instance;
 
@@ -677,10 +655,13 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
       return (data['type'] ?? '').toString() == 'position';
     }).length;
 
-    if (_employeesCount == 0) {
+    final ownerEmployees = await db.collection('employees')
+        .where('idCompany', isEqualTo: _companyId)
+        .where('user_id', isEqualTo: currentUserUid).limit(1).get();
+    if (ownerEmployees.docs.isEmpty) {
       final displayName = currentUserDisplayName.trim();
       final email = currentUserEmail.trim();
-      await db.collection('employees').add({
+      await db.collection('employees').doc('owner_${_companyId}_$currentUserUid').set({
         'idCompany': _companyId,
         'user_id': currentUserUid,
         'name': displayName.isNotEmpty
@@ -710,7 +691,7 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
   }) {
     final isWarning =
         stepKey != null && !done && _stepSkippedAndIncompleteByKey(stepKey);
-    final isDisabled = !enabled || (_locked && !isWarning);
+    final isDisabled = !enabled;
     final color = done
         ? const Color(0xFFE6F4EA)
         : isWarning
@@ -808,7 +789,7 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (allowSkip && !_locked)
+              if (allowSkip)
                 TextButton(
                   style: TextButton.styleFrom(
                     foregroundColor: isWarning ? const Color(0xFFB42318) : null,
@@ -1152,7 +1133,7 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
                           onSkip: () => _skipStep('budgets'),
                         ),
                         const SizedBox(height: 16),
-                        if (_locked)
+                        if (_onboardingComplete)
                           Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
@@ -1163,12 +1144,12 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.lock,
+                                const Icon(Icons.check_circle,
                                     color: Color(0xFF34A853)),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
-                                    'Заполненные блоки зафиксированы. Пропущенные блоки можно заполнить позже.',
+                                    'Первый вход завершён. Все блоки можно редактировать и дополнять в любое время.',
                                     style: FlutterFlowTheme.of(context)
                                         .bodyMedium
                                         .override(
@@ -1184,7 +1165,7 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
                           FFButtonWidget(
                             onPressed: hasCompany ? _finishOnboarding : null,
                             text:
-                                'Завершить первый вход и заблокировать изменения',
+                                'Завершить первый вход',
                             options: FFButtonOptions(
                               height: 44,
                               padding: const EdgeInsetsDirectional.fromSTEB(
@@ -1203,7 +1184,7 @@ class _CompanyOnboardingWidgetState extends State<CompanyOnboardingWidget> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                        if (!_allStepsDone && !_locked)
+                        if (!_allStepsDone)
                           Padding(
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Text(
