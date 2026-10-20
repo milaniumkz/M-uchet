@@ -1,0 +1,5 @@
+# Replace with the real hostname only after the server and DNS are configured.
+muchet.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:18080
+}

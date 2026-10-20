@@ -1,0 +1,51 @@
+# Template for the future server. No production service is started by setup.
+name: muchet
+services:
+  db:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_DB: muchet
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_admin_password
+      MUCHET_APP_PASSWORD_FILE: /run/secrets/db_password
+    entrypoint: ["/bin/sh", "/opt/muchet-db-entrypoint.sh"]
+    command: ["postgres"]
+    secrets: [db_admin_password, db_password]
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ./db-entrypoint.sh:/opt/muchet-db-entrypoint.sh:ro
+      - ./db-init.sql:/docker-entrypoint-initdb.d/01-muchet.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d muchet]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+  api:
+    image: ${MUCHET_IMAGE:?Set the locally built or reviewed image tag}
+    init: true
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets: [database_url]
+    volumes: [uploads:/app/data]
+    ports: ["127.0.0.1:${MUCHET_PORT:-18080}:8080"]
+    depends_on:
+      db: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 768m
+    stop_grace_period: 30s
+    restart: unless-stopped
+secrets:
+  db_admin_password:
+    file: ${MUCHET_DB_ADMIN_PASSWORD_FILE:?Set a protected separate administrator password file}
+  db_password:
+    file: ${MUCHET_DB_PASSWORD_FILE:?Set a protected database password file}
+  database_url:
+    file: ${MUCHET_DATABASE_URL_FILE:?Set a protected connection URL file readable by uid1000}
+volumes:
+  database:
+  uploads:

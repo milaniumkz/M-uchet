@@ -40,3 +40,10 @@ build-workspace-web:
 	./scripts/flutter.sh build web --release --no-wasm-dry-run --target lib/main_server.dart
 build-workspace-android:
 	./scripts/flutter.sh build apk --debug --target lib/main_server.dart
+
+build-container:
+	node scripts/build_container.mjs $(or $(MUCHET_IMAGE),muchet:local-check)
+test-container:
+	node deploy/check-container.mjs $(or $(MUCHET_IMAGE),muchet:local-check)
+
+.PHONY: build-container test-container

@@ -1,0 +1,17 @@
+**
+!server/
+!server/package.json
+!server/package-lock.json
+!server/src/
+!server/src/**
+!server/migrations/
+!server/migrations/**
+!docs/
+!docs/legal/
+!docs/legal/chart-of-accounts-2026.json
+!build/
+!build/web/
+!build/web/**
+!deploy/
+!deploy/Dockerfile
+!deploy/container-entrypoint.mjs
