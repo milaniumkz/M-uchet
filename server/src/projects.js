@@ -1,3 +1,4 @@
+import { profitBucket, accumulateProfit, profitResult } from './profit.js';
 import { randomUUID } from 'node:crypto';
 import { fail, text, scope, businessDate } from './security.js';
 import { projectReference } from './accounting.js';
@@ -34,23 +35,16 @@ export function registerProjectRoutes({ route, db, access, command, object }) {
     const selected = request.query.projectId;
     if (selected && selected !== 'unassigned') await projectReference(db,companyId,selected);
     const projects = await db.prepare('SELECT id,name,archived FROM projects WHERE company_id=? ORDER BY name,id').all(companyId);
-    const empty = () => ({ revenue:0, cogs:0, expenses:0, grossProfit:0, netProfit:0 });
-    const buckets = new Map(projects.map(p=>[p.id,{projectId:p.id,name:p.name,archived:p.archived,...empty()}]));
-    buckets.set(null,{projectId:null,name:'Общие операции фирмы',archived:false,...empty()});
+    const buckets = new Map(projects.map(p=>[p.id,{projectId:p.id,name:p.name,archived:p.archived,amounts:profitBucket()}]));
+    buckets.set(null,{projectId:null,name:'Общие операции фирмы',archived:false,amounts:profitBucket()});
     const rows = await db.prepare("SELECT project_id,lines FROM journal WHERE company_id=? AND (scope=? OR scope='BOTH') AND business_date>=? AND business_date<=?").all(companyId,ledgerScope,from,to);
-    for (const row of rows) for (const line of JSON.parse(row.lines)) {
-      const bucket=buckets.get(row.project_id);
-      if(line.account==='revenue')bucket.revenue+=line.credit-line.debit;
-      if(line.account==='cogs')bucket.cogs+=line.debit-line.credit;
-      if(['expenses','inventory_loss','depreciation','asset_disposal_loss','salary_expense','payroll_employer_expense'].includes(line.account))bucket.expenses+=line.debit-line.credit;
-    }
-    const items=[...buckets.values()];
-    const total=empty();
-    for(const item of items){
-      item.grossProfit=item.revenue-item.cogs;item.netProfit=item.grossProfit-item.expenses;
-      for(const key of Object.keys(total)){if(!Number.isSafeInteger(item[key]))fail(422,'report_amount_overflow');total[key]+=item[key];}
-    }
-    for(const value of Object.values(total))if(!Number.isSafeInteger(value))fail(422,'report_amount_overflow');
+    for (const row of rows) accumulateProfit(buckets.get(row.project_id).amounts, JSON.parse(row.lines));
+    const totals = profitBucket();
+    const items = [...buckets.values()].map(({amounts,...item})=>{
+      for(const key of Object.keys(totals)) totals[key] += amounts[key];
+      return {...item,...profitResult(amounts)};
+    });
+    const total = profitResult(totals);
     return { scope:ledgerScope,from,to,currency:(await access(request,'reports.read')).currency,
       items:selected?items.filter(p=>p.projectId===(selected==='unassigned'?null:selected)):items,total };
   });

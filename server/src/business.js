@@ -1,3 +1,4 @@
+import { profitBucket, accumulateProfit, profitResult } from './profit.js';
 import { projectOrderPayments } from './order-payments.js';
 import { registerProjectRoutes } from './projects.js';
 import { randomUUID } from 'node:crypto';
@@ -330,14 +331,9 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const selected=request.query.projectId;
     if(selected!==undefined&&selected!=='unassigned')await projectReference(db,request.params.companyId,selected);
     const rows=await db.prepare(`SELECT lines FROM journal WHERE company_id=? AND (scope=? OR scope='BOTH') AND business_date>=? AND business_date<=?${selected===undefined?'':' AND project_id IS NOT DISTINCT FROM ?'}`).all(request.params.companyId,ledgerScope,from,to,...(selected===undefined?[]:[selected==='unassigned'?null:selected]));
-    let revenue = 0, cogs = 0, expenses = 0;
-    for (const row of rows) for (const line of JSON.parse(row.lines)) {
-      if (line.account === 'revenue') revenue += line.credit - line.debit;
-      if (line.account === 'cogs') cogs += line.debit - line.credit;
-      if (['expenses','inventory_loss','depreciation','asset_disposal_loss','salary_expense','payroll_employer_expense'].includes(line.account)) expenses += line.debit - line.credit;
-    }
-    for (const amount of [revenue,cogs,expenses,revenue-cogs-expenses]) if (!Number.isSafeInteger(amount)) fail(422, 'report_amount_overflow');
-    return { scope: ledgerScope, from, to, revenue, cogs, grossProfit: revenue-cogs, expenses, netProfit: revenue-cogs-expenses };
+    const result = profitBucket();
+    for (const row of rows) accumulateProfit(result, JSON.parse(row.lines));
+    return { scope: ledgerScope, from, to, ...profitResult(result) };
   });
   route('GET','/periods',async request=>{
     const company=await access(request,'accounting.read');

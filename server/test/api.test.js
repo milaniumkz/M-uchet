@@ -1097,3 +1097,39 @@ test('payroll save checks the company and employee revisions reviewed in preview
  const current=(await f.api('POST','/payroll/preview',f.body)).body;
  assert.equal((await f.api('POST','/payroll',{...f.body,expectedCompanyVersion:current.input.company.version,expectedEmployeeVersion:current.input.employee.version})).status,200);
 });
+
+test('numeric KZ income, returns, costs and expenses reconcile across project and firm reports after historical correction', async t => {
+ const f=await fixture(t);
+ const project=(await f.api('POST','/projects',{name:'Dynamic numeric project'})).body;
+ const entry=async(projectId,lines,date='2026-01-15',scope='ACCOUNTING')=>{
+  const response=await f.api('POST','/accounting/journal',{description:'Numeric chart entry',businessDate:date,scope,projectId,lines});
+  assert.equal(response.status,200,JSON.stringify(response.body));return response.body;
+ };
+ await entry(project.id,[{account:'1210',debit:10000},{account:'6010',credit:10000}]);
+ await entry(project.id,[{account:'6020',debit:1000},{account:'1210',credit:1000}]);
+ await entry(project.id,[{account:'6030',debit:500},{account:'1210',credit:500}]);
+ await entry(project.id,[{account:'7010',debit:3000},{account:'1330',credit:3000}]);
+ const expense=await entry(project.id,[{account:'7210',debit:2000},{account:'3310',credit:2000}]);
+ await entry(null,[{account:'7310',debit:400},{account:'3380',credit:400}]);
+ await entry(null,[{account:'1270',debit:200},{account:'6110',credit:200}],undefined,'BOTH');
+ await entry(null,[{account:'receivables',debit:300},{account:'revenue',credit:300}]);
+ await entry(project.id,[{account:'1210',debit:999},{account:'6010',credit:999}],'2026-02-01');
+ await entry(project.id,[{account:'7210',debit:777},{account:'3310',credit:777}],undefined,'MANAGEMENT');
+ const query='?from=2026-01-01&to=2026-01-31';
+ let report=(await f.api('GET','/reports/projects'+query)).body;
+ assert.deepEqual(report.total,{revenue:9000,cogs:3000,expenses:2400,grossProfit:6000,netProfit:3600});
+ assert.equal(report.items.find(p=>p.projectId===project.id).netProfit,3500);
+ assert.equal(report.items.find(p=>p.projectId===null).netProfit,100);
+ const pl=(await f.api('GET','/reports/profit-loss'+query)).body;
+ for(const [key,value] of Object.entries(report.total))assert.equal(pl[key],value);
+ assert.equal((await f.api('GET','/reports/profit-loss'+query+'&projectId='+project.id)).body.netProfit,3500);
+ const close=await f.api('POST','/periods/2026-01/close',{reason:'Owner reviewed January'});assert.equal(close.status,200);
+ const old=(await f.api('GET','/accounting/journal/'+expense.id)).body;
+ const edited=await f.api('PUT','/accounting/journal/'+expense.id,{expectedRevision:old.revision,description:'Correct numeric expense',businessDate:'2026-01-15',scope:'ACCOUNTING',projectId:project.id,lines:[{account:'7210',debit:1500},{account:'3310',credit:1500}]});
+ assert.equal(edited.status,200,JSON.stringify(edited.body));
+ report=(await f.api('GET','/reports/projects'+query)).body;
+ assert.equal(report.total.netProfit,4100);
+ assert.equal(report.items.find(p=>p.projectId===project.id).netProfit,4000);
+ const trial=(await f.api('GET','/accounting/trial-balance'+query)).body;
+ assert.equal(trial.accounts.find(a=>a.account==='7210').balance,1500);
+});
