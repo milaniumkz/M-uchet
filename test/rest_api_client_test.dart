@@ -40,12 +40,14 @@ void main() {
         transport: MockClient(
             (_) async => http.Response('{"error":"invalid_session"}', 401)));
     addTearDown(api.close);
+    var expired=0;api.onUnauthorized=()=>expired++;
     api.acceptSession(List.filled(43, 'A').join());
     await expectLater(
         api.request('GET', ['v1', 'companies']),
         throwsA(
             isA<BackendException>().having((e) => e.status, 'status', 401)));
     expect(api.authenticated, isFalse);
+    expect(expired,1);
   });
 
   test(

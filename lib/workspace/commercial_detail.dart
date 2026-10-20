@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import '../backend/rest/api_client.dart';
@@ -28,6 +29,8 @@ class CommercialDetail extends StatefulWidget {
 class _CommercialDetailState extends State<CommercialDetail> {
   late Map<String, dynamic> doc = widget.document;
   late final repository = CommercialRepository(widget.api, widget.companyId);
+  bool get editable=>hasCompanyPermission(context,'documents.write')&&((doc['status']!='POSTED'&&(doc['paid'] as num? ??0)==0)||hasCompanyPermission(context,'documents.post'));
+  bool get canSettle=>hasCompanyPermission(context,'documents.settle')&&hasCompanyPermission(context,'wallets.transact');
   bool busy = false, uncertain = false;
   String? error;
   RetriableCommand? pending;
@@ -185,10 +188,10 @@ class _CommercialDetailState extends State<CommercialDetail> {
                 if (payment['voided'] != true)
                   IconButton(
                       tooltip: 'Изменить оплату',
-                      onPressed: busy || uncertain ? null : () => pay(payment),
+                      onPressed: busy || uncertain || !canSettle ? null : () => pay(payment),
                       icon: const Icon(Icons.edit_outlined)),
                 TextButton(
-                    onPressed: busy || uncertain
+                    onPressed: busy || uncertain || !canSettle
                         ? null
                         : () => execute(RetriableCommand('POST', [
                               ...repository.path(
@@ -232,32 +235,32 @@ class _CommercialDetailState extends State<CommercialDetail> {
                       Wrap(spacing: 12, runSpacing: 12, children: [
                         Chip(label: Text(documentStatuses[doc['status']]!)),
                         TextButton.icon(
-                            onPressed: enabled ? edit : null,
+                            onPressed: enabled&&editable ? edit : null,
                             icon: const Icon(Icons.edit_outlined),
                             label: const Text('Изменить')),
                         TextButton.icon(
-                            onPressed: enabled ? pdf : null,
+                            onPressed: enabled&&hasCompanyPermission(context,'documents.export') ? pdf : null,
                             icon: const Icon(Icons.picture_as_pdf_outlined),
                             label: const Text('Скачать PDF')),
                         if (doc['status'] == 'DRAFT' ||
                             doc['status'] == 'CANCELLED')
                           FilledButton(
-                              onPressed: enabled ? () => run('post') : null,
+                              onPressed: enabled&&hasCompanyPermission(context,'documents.post') ? () => run('post') : null,
                               child: Text(doc['kind'] == 'SALE_INVOICE'
                                   ? 'Выставить счёт'
                                   : 'Провести')),
                         if (canAct)
                           FilledButton(
-                              onPressed: enabled ? () => run('act') : null,
+                              onPressed: enabled&&hasCompanyPermission(context,'documents.write') ? () => run('act') : null,
                               child: const Text('Создать акт')),
                         if (['ISSUED', 'POSTED'].contains(doc['status']) &&
                             (doc['outstanding'] as num) > 0)
                           FilledButton(
-                              onPressed: enabled ? pay : null,
+                              onPressed: enabled&&canSettle ? pay : null,
                               child: const Text('Связать оплату')),
                         if (doc['status'] != 'CANCELLED')
                           TextButton(
-                              onPressed: enabled ? () => run('cancel') : null,
+                              onPressed: enabled&&hasCompanyPermission(context,'documents.post') ? () => run('cancel') : null,
                               child: const Text('Отменить документ')),
                         if (uncertain)
                           FilledButton(

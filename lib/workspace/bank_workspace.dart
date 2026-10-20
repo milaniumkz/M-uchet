@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -6,12 +7,15 @@ import '../backend/rest/retriable_command.dart';
 import 'commercial_repository.dart';
 import 'commercial_detail.dart';
 import 'input_dialogs.dart';
+import 'cash_workspace.dart';
+import 'journal_editor.dart';
 
 const bankCategories = {
   'INCOME': 'Доход',
   'EXPENSE': 'Расход',
   'CAPITAL': 'Вклад собственника',
   'DOCUMENT': 'Оплата документа',
+  'EXISTING': 'Уже учтённая операция',
   'IGNORE': 'Не проводить',
 };
 
@@ -147,12 +151,22 @@ class _BankWorkspaceState extends State<BankWorkspace> {
     }
   }
 
-  Future<void> review(Map<String,dynamic> row) async {
-    if(busy||opening){return;}
-    opening=true;
-    try{await reviewSource(row);}on BackendException catch(e){if(mounted){setState(()=>error=e.message);}}
-    finally{opening=false;}
+  Future<void> review(Map<String, dynamic> row) async {
+    if (busy || opening) {
+      return;
+    }
+    opening = true;
+    try {
+      await reviewSource(row);
+    } on BackendException catch (e) {
+      if (mounted) {
+        setState(() => error = e.message);
+      }
+    } finally {
+      opening = false;
+    }
   }
+
   Future<void> reviewSource(Map<String, dynamic> row) async {
     if (row['journal_id'] != null) {
       if (row['document_id'] != null) {
@@ -174,6 +188,51 @@ class _BankWorkspaceState extends State<BankWorkspace> {
               projects: widget.projects,
               onChanged: widget.onChanged,
             ),
+          ),
+        );
+      } else if ([
+        'TRANSFER_IN',
+        'TRANSFER_OUT',
+      ].contains(row['current_kind'])) {
+        await showWalletTransfer(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          currency: widget.currency,
+          transferId: row['current_reference_id'] as String,
+        );
+      } else if (![
+        'INCOME',
+        'EXPENSE',
+        'CAPITAL',
+      ].contains(row['current_kind'])) {
+        if (!hasCompanyPermission(context, 'accounting.read')) {
+          setState(
+            () => error =
+                'Для открытия проводки нужно право просмотра бухгалтерского журнала.',
+          );
+          return;
+        }
+        final entry = jsonObject(
+          await widget.api.request('GET', [
+            'v1',
+            'companies',
+            widget.companyId,
+            'accounting',
+            'journal',
+            row['journal_id'] as String,
+          ]),
+        );
+        if (!mounted) {
+          return;
+        }
+        await showDialog<bool>(
+          context: context,
+          builder: (_) => JournalEditor(
+            api: widget.api,
+            companyId: widget.companyId,
+            projects: widget.projects,
+            entry: entry,
           ),
         );
       } else {
@@ -220,7 +279,12 @@ class _BankWorkspaceState extends State<BankWorkspace> {
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
           ),
           FilledButton.icon(
-            onPressed: busy || wallets.isEmpty ? null : upload,
+            onPressed:
+                busy ||
+                    wallets.isEmpty ||
+                    !hasCompanyPermission(context, 'bank.import')
+                ? null
+                : upload,
             icon: const Icon(Icons.upload_file),
             label: const Text('Загрузить выписку'),
           ),
@@ -254,7 +318,10 @@ class _BankWorkspaceState extends State<BankWorkspace> {
             ),
           ),
           TextButton.icon(
-            onPressed: busy || pending.containsKey('wallet')
+            onPressed:
+                busy ||
+                    pending.containsKey('wallet') ||
+                    !hasCompanyPermission(context, 'wallets.write')
                 ? null
                 : createWallet,
             icon: const Icon(Icons.add),
@@ -345,7 +412,24 @@ class _BankWorkspaceState extends State<BankWorkspace> {
                     spacing: 12,
                     children: [
                       TextButton(
-                        onPressed: busy ? null : () => review(row),
+                        onPressed:
+                            busy ||
+                                !(row['journal_id'] == null
+                                    ? hasCompanyPermission(
+                                        context,
+                                        'bank.review',
+                                      )
+                                    : row['document_id'] != null
+                                    ? hasCompanyPermission(
+                                        context,
+                                        'documents.read',
+                                      )
+                                    : hasCompanyPermission(
+                                        context,
+                                        'wallets.transact',
+                                      ))
+                            ? null
+                            : () => review(row),
                         child: Text(
                           row['journal_id'] != null
                               ? 'Открыть и исправить'
@@ -356,7 +440,18 @@ class _BankWorkspaceState extends State<BankWorkspace> {
                           row['classification'] != null &&
                           row['classification'] != 'IGNORE')
                         FilledButton(
-                          onPressed: busy
+                          onPressed:
+                              busy ||
+                                  !hasCompanyPermission(context, 'bank.post') ||
+                                  !hasCompanyPermission(
+                                    context,
+                                    'wallets.transact',
+                                  ) ||
+                                  (row['document_id'] != null &&
+                                      !hasCompanyPermission(
+                                        context,
+                                        'documents.settle',
+                                      ))
                               ? null
                               : () => execute(
                                   row['id'] as String,
@@ -696,10 +791,10 @@ class BankReview extends StatefulWidget {
 }
 
 class _BankReviewState extends State<BankReview> {
-  String? classification, projectId, documentId, error;
+  String? classification, projectId, documentId, entryId, error;
   bool busy = false;
   final search = TextEditingController();
-  List<Map<String, dynamic>> documents = [];
+  List<Map<String, dynamic>> documents = [], candidates = [];
   RetriableCommand? pending;
   @override
   void initState() {
@@ -707,6 +802,10 @@ class _BankReviewState extends State<BankReview> {
     classification = widget.row['classification'] as String?;
     projectId = widget.row['project_id'] as String?;
     documentId = widget.row['document_id'] as String?;
+    entryId = widget.row['matched_entry_id'] as String?;
+    if (classification == 'EXISTING') {
+      findCandidates();
+    }
     if (classification == 'DOCUMENT') {
       findDocuments();
     }
@@ -716,6 +815,38 @@ class _BankReviewState extends State<BankReview> {
   void dispose() {
     search.dispose();
     super.dispose();
+  }
+
+  Future<void> findCandidates() async {
+    setState(() => busy = true);
+    try {
+      final result = jsonObject(
+        await widget.api.request('GET', [
+          'v1',
+          'companies',
+          widget.companyId,
+          'bank-imports',
+          widget.importId,
+          'rows',
+          widget.row['id'] as String,
+          'candidates',
+        ]),
+      );
+      if (mounted) {
+        setState(() {
+          candidates = (result['items'] as List).map(jsonObject).toList();
+          error = null;
+        });
+      }
+    } on BackendException catch (e) {
+      if (mounted) {
+        setState(() => error = e.message);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => busy = false);
+      }
+    }
   }
 
   Future<void> findDocuments() async {
@@ -767,6 +898,7 @@ class _BankReviewState extends State<BankReview> {
           'classification': classification,
           'projectId': projectId,
           'documentId': documentId,
+          'entryId': entryId,
         },
       );
       await pending!.execute(widget.api);
@@ -806,6 +938,7 @@ class _BankReviewState extends State<BankReview> {
                   .where(
                     (e) =>
                         e.key == 'DOCUMENT' ||
+                        e.key == 'EXISTING' ||
                         e.key == 'IGNORE' ||
                         ((widget.row['amount'] as num) > 0
                             ? e.key != 'EXPENSE'
@@ -819,13 +952,16 @@ class _BankReviewState extends State<BankReview> {
                   ? null
                   : (v) {
                       setState(() => classification = v);
+                      if (v == 'EXISTING') {
+                        findCandidates();
+                      }
                       if (v == 'DOCUMENT') {
                         findDocuments();
                       }
                     },
             ),
             const SizedBox(height: 16),
-            if (classification != 'DOCUMENT')
+            if (!['DOCUMENT', 'EXISTING'].contains(classification))
               DropdownButtonFormField<String>(
                 isExpanded: true,
                 initialValue: projectId ?? 'unassigned',
@@ -848,6 +984,34 @@ class _BankReviewState extends State<BankReview> {
                         () => projectId = v == 'unassigned' ? null : v,
                       ),
               ),
+            if (classification == 'EXISTING') ...[
+              const Text(
+                'Выберите уже внесённое движение с тем же счётом, датой и суммой. Новые проводки и оплаты не создаются.',
+              ),
+              TextButton(
+                onPressed: busy || pending != null ? null : findCandidates,
+                child: const Text('Обновить подходящие операции'),
+              ),
+              if (candidates.isEmpty && !busy)
+                const Text('Подходящих несопоставленных операций нет.'),
+              ...candidates.map(
+                (e) => ListTile(
+                  selected: entryId == e['id'],
+                  leading: Icon(
+                    entryId == e['id']
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                  ),
+                  title: Text(e['description'] as String),
+                  subtitle: Text(
+                    '${e['business_date']} · ${moneyText(e['amount'] as num, 'KZT')}',
+                  ),
+                  onTap: busy || pending != null
+                      ? null
+                      : () => setState(() => entryId = e['id'] as String),
+                ),
+              ),
+            ],
             if (classification == 'DOCUMENT') ...[
               TextField(
                 controller: search,
@@ -904,7 +1068,8 @@ class _BankReviewState extends State<BankReview> {
         onPressed:
             busy ||
                 classification == null ||
-                (classification == 'DOCUMENT' && documentId == null)
+                (classification == 'DOCUMENT' && documentId == null) ||
+                (classification == 'EXISTING' && entryId == null)
             ? null
             : save,
         child: Text(

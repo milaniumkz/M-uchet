@@ -12,6 +12,11 @@ import 'package:uchet_s_d/workspace/bank_workspace.dart';
 class RealNetwork extends HttpOverrides {}
 
 class SyntheticPicker extends FilePicker {
+  SyntheticPicker({
+    this.csv =
+        'date;reference;debit;credit;description;counterparty\n2026-10-20;SYNTHETIC-UI-BANK-1;0;123.45;ТЕСТОВЫЙ ДОХОД;ТЕСТ',
+  });
+  final String csv;
   @override
   Future<FilePickerResult?> pickFiles({
     String? dialogTitle,
@@ -27,11 +32,7 @@ class SyntheticPicker extends FilePicker {
     bool lockParentWindow = false,
     bool readSequential = false,
   }) async {
-    final bytes = Uint8List.fromList(
-      utf8.encode(
-        'date;reference;debit;credit;description;counterparty\n2026-10-20;SYNTHETIC-UI-BANK-1;0;123.45;ТЕСТОВЫЙ ДОХОД;ТЕСТ',
-      ),
-    );
+    final bytes = Uint8List.fromList(utf8.encode(csv));
     return FilePickerResult([
       PlatformFile(
         name: 'synthetic-bank.csv',
@@ -54,9 +55,15 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       FilePicker? previous;
-    try { previous = FilePicker.platform; } catch (_) {}
+      try {
+        previous = FilePicker.platform;
+      } catch (_) {}
       FilePicker.platform = SyntheticPicker();
-      addTearDown(() { if(previous!=null){FilePicker.platform=previous;} });
+      addTearDown(() {
+        if (previous != null) {
+          FilePicker.platform = previous;
+        }
+      });
       final fixture =
           jsonDecode(
                 File(
@@ -153,6 +160,63 @@ void main() {
           ]),
         );
         expect(jsonObject((wallets['items'] as List).single)['balance'], 12345);
+      });
+      await tester.runAsync(() async {
+        final wallets = jsonObject(
+          await api.request('GET', [
+            'v1',
+            'companies',
+            company['id'] as String,
+            'wallets',
+          ]),
+        );
+        final wallet = jsonObject((wallets['items'] as List).single);
+        await api.request(
+          'POST',
+          [
+            'v1',
+            'companies',
+            company['id'] as String,
+            'wallets',
+            wallet['id'] as String,
+            'transactions',
+          ],
+          body: {
+            'type': 'INCOME',
+            'amount': 789,
+            'description': 'SYNTHETIC ALREADY ENTERED',
+            'businessDate': '2026-10-20',
+          },
+          operation: OperationKey(),
+        );
+      });
+      FilePicker.platform = SyntheticPicker(
+        csv:
+            'date;reference;debit;credit;description;counterparty\n2026-10-20;SYNTHETIC-UI-EXISTING;0;7.89;Existing receipt;ТЕСТ',
+      );
+      await click(find.text('Загрузить выписку'));
+      await click(find.text('Выбрать CSV'));
+      await click(find.text('Проверить файл'));
+      await click(find.text('Загрузить для сопоставления'));
+      await click(find.text('Сопоставить'));
+      await click(find.text('Вид операции'));
+      await click(find.text('Уже учтённая операция').last);
+      await click(find.text('SYNTHETIC ALREADY ENTERED'));
+      await click(find.text('Сохранить сопоставление'));
+      await click(find.text('Провести'));
+      expect(find.text('Проведено'), findsOneWidget);
+      await click(find.text('Открыть и исправить'));
+      expect(edited?['amount'], 789);
+      await tester.runAsync(() async {
+        final wallets = jsonObject(
+          await api.request('GET', [
+            'v1',
+            'companies',
+            company['id'] as String,
+            'wallets',
+          ]),
+        );
+        expect(jsonObject((wallets['items'] as List).single)['balance'], 13134);
       });
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

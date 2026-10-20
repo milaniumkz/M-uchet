@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
@@ -155,7 +156,7 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
                           style: const TextStyle(
                               fontSize: 29, fontWeight: FontWeight.bold)),
                       FilledButton.icon(
-                          onPressed: loading ? null : create,
+                          onPressed: loading||!hasCompanyPermission(context,'documents.write') ? null : create,
                           icon: const Icon(Icons.add),
                           label: const Text('Новый документ'))
                     ]),

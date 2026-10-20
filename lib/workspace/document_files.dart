@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -134,7 +135,7 @@ class _DocumentFilesState extends State<DocumentFiles> {
           Text(error!, style: const TextStyle(color: Colors.red)),
         Wrap(spacing: 16, children: [
           FilledButton.icon(
-              onPressed: busy || pending != null ? null : upload,
+              onPressed: busy || pending != null || !hasCompanyPermission(context,'files.write') || !hasCompanyPermission(context,'documents.write') ? null : upload,
               icon: const Icon(Icons.attach_file),
               label: const Text('Прикрепить файл')),
           if (pending != null)

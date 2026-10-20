@@ -75,6 +75,18 @@ export async function openDatabase({ connectionString = process.env.DATABASE_URL
       if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=14').get()) {
         await db.exec(await readFile(new URL('../migrations/013_employees.sql', import.meta.url), 'utf8'));
       }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=15').get()) {
+        await db.exec(await readFile(new URL('../migrations/014_company_invitations.sql', import.meta.url), 'utf8'));
+      }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=16').get()) {
+        await db.exec(await readFile(new URL('../migrations/015_private_company_creation.sql', import.meta.url), 'utf8'));
+      }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=17').get()) {
+        await db.exec(await readFile(new URL('../migrations/016_cash_reconciliation.sql', import.meta.url), 'utf8'));
+      }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=18').get()) {
+        await db.exec(await readFile(new URL('../migrations/017_bank_existing_entries.sql', import.meta.url), 'utf8'));
+      }
     });
     return db;
   } catch (error) { await pool.end(); throw error; }

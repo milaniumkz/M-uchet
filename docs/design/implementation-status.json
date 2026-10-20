@@ -114,7 +114,7 @@
       "status": "partial",
       "visual_parity_verified": false,
       "source": "lib/workspace/bank_workspace.dart",
-      "implemented_scope": "Ручное сопоставление проекта/документа, подтверждение, переход к исправлению"
+      "implemented_scope": "CSV, ручная классификация, оплата документа и сопоставление с уже внесённым движением без повторной проводки; исходная строка сохраняется"
     },
     {
       "id": "D-14",
@@ -122,8 +122,8 @@
       "platform": "desktop",
       "status": "partial",
       "visual_parity_verified": false,
-      "source": "lib/main_server.dart",
-      "implemented_scope": "Денежные счета и операции; полный экран кассы и смены ещё не перенесены"
+      "source": "lib/workspace/cash_workspace.dart",
+      "implemented_scope": "Счета, доходы/расходы с датой, исправляемые переводы, смены, исправление пересчёта и история; фискальная ККМ не подключена"
     },
     {
       "id": "D-15",

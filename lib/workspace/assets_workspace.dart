@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
@@ -133,7 +134,7 @@ class _AssetsWorkspaceState extends State<AssetsWorkspace> {
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
           ),
           FilledButton.icon(
-            onPressed: busy ? null : create,
+            onPressed: busy||!hasCompanyPermission(context,'assets.write') ? null : create,
             icon: const Icon(Icons.add),
             label: const Text('Добавить актив'),
           ),
@@ -350,12 +351,12 @@ class _AssetDetailState extends State<AssetDetail> {
                 runSpacing: 10,
                 children: [
                   OutlinedButton(
-                    onPressed: busy || pending != null ? null : edit,
+                    onPressed: busy || pending != null || !hasCompanyPermission(context,'assets.write') || (asset!['status']!='DRAFT'&&!hasCompanyPermission(context,'assets.post')) ? null : edit,
                     child: const Text('Изменить актив'),
                   ),
                   if (asset!['status'] != 'ACTIVE')
                     FilledButton(
-                      onPressed: busy || pending != null
+                      onPressed: busy || pending != null || !hasCompanyPermission(context,'assets.post')
                           ? null
                           : () => execute('activate', {}),
                       child: Text(
@@ -366,11 +367,11 @@ class _AssetDetailState extends State<AssetDetail> {
                     ),
                   if (asset!['status'] == 'ACTIVE') ...[
                     FilledButton(
-                      onPressed: busy || pending != null ? null : depreciate,
+                      onPressed: busy || pending != null || !hasCompanyPermission(context,'assets.post') ? null : depreciate,
                       child: const Text('Начислить амортизацию'),
                     ),
                     OutlinedButton(
-                      onPressed: busy || pending != null ? null : writeoff,
+                      onPressed: busy || pending != null || !hasCompanyPermission(context,'assets.post') ? null : writeoff,
                       child: const Text('Списать актив'),
                     ),
                   ],

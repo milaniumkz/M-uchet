@@ -58,18 +58,40 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
     const company=await access(request,'bank.read');
     const item=await db.prepare('SELECT * FROM bank_imports WHERE company_id=? AND id=?').get(company.id,request.params.id);
     if(!item)fail(404,'bank_import_not_found');
-    const rows=await db.prepare(`SELECT r.*,p.voided AS payment_voided,e.id AS wallet_entry_id,e.amount AS current_amount,e.kind AS current_kind,j.description AS current_description,j.business_date AS current_business_date,j.project_id AS current_project_id
+    const rows=await db.prepare(`SELECT r.*,p.voided AS payment_voided,e.id AS wallet_entry_id,e.amount AS current_amount,e.kind AS current_kind,e.reference_id AS current_reference_id,j.description AS current_description,j.business_date AS current_business_date,j.project_id AS current_project_id
       FROM bank_import_rows r LEFT JOIN commercial_payments p ON p.company_id=r.company_id AND p.id=r.payment_id LEFT JOIN wallet_entries e ON e.journal_id=r.journal_id AND e.wallet_id=r.wallet_id
       LEFT JOIN journal j ON j.id=r.journal_id WHERE r.company_id=? AND r.import_id=? ORDER BY r.business_date,r.id`).all(company.id,item.id);
     return {...item,items:rows};
+  });
+  const existingEntry = async (request, companyId, row, id) => {
+    await access(request,'wallets.read');
+    const entry=await db.prepare(`SELECT e.*,j.business_date FROM wallet_entries e JOIN journal j ON j.company_id=e.company_id AND j.id=e.journal_id
+      WHERE e.company_id=? AND e.wallet_id=? AND e.id=?`).get(companyId,row.wallet_id,text(id,'entryId'));
+    if(!entry)fail(404,'wallet_entry_not_found');
+    if(entry.amount!==row.amount||entry.business_date!==row.business_date)fail(409,'bank_existing_entry_mismatch');
+    if(await db.prepare('SELECT 1 FROM commercial_payments WHERE company_id=? AND journal_id=? AND voided=TRUE').get(companyId,entry.journal_id))fail(409,'bank_payment_voided');
+    if(await db.prepare('SELECT 1 FROM bank_import_rows WHERE company_id=? AND wallet_id=? AND (journal_id=? OR matched_entry_id=?) AND id<>?').get(companyId,row.wallet_id,entry.journal_id,entry.id,row.id))fail(409,'bank_entry_already_matched');
+    return entry;
+  };
+  route('GET','/:id/rows/:rowId/candidates',async request=>{
+    const company=await access(request,'bank.read'); await access(request,'wallets.read');
+    const row=await getRow(company.id,request.params.id,request.params.rowId);
+    const items=await db.prepare(`SELECT e.id,e.amount,e.kind,e.reference_id,e.journal_id,j.business_date,j.description,j.project_id
+      FROM wallet_entries e JOIN journal j ON j.company_id=e.company_id AND j.id=e.journal_id
+      WHERE e.company_id=? AND e.wallet_id=? AND e.amount=? AND j.business_date=?
+      AND NOT EXISTS(SELECT 1 FROM bank_import_rows r WHERE r.company_id=e.company_id AND r.wallet_id=e.wallet_id AND (r.journal_id=e.journal_id OR r.matched_entry_id=e.id) AND r.id<>?)
+      AND NOT EXISTS(SELECT 1 FROM commercial_payments p WHERE p.company_id=e.company_id AND p.journal_id=e.journal_id AND p.voided=TRUE)
+      ORDER BY e.created_at DESC,e.id LIMIT 100`).all(company.id,row.wallet_id,row.amount,row.business_date,row.id);
+    return {items};
   });
   route('PUT','/:id/rows/:rowId',request=>command(request,'bank.review','bank.review',async company=>{
     const row=await getRow(company.id,request.params.id,request.params.rowId),body=object(request.body);
     if(row.journal_id)fail(409,'bank_edit_source_required');
     if(body.version!==row.version)fail(409,'version_conflict');
     const type=body.classification;
-    if(!['INCOME','EXPENSE','CAPITAL','DOCUMENT','IGNORE'].includes(type))fail(400,'invalid_bank_classification');
+    if(!['INCOME','EXPENSE','CAPITAL','DOCUMENT','EXISTING','IGNORE'].includes(type))fail(400,'invalid_bank_classification');
     if((type==='INCOME'||type==='CAPITAL')&&row.amount<0||type==='EXPENSE'&&row.amount>0)fail(400,'bank_direction_mismatch');
+    if(type==='EXISTING')await existingEntry(request,company.id,row,body.entryId);
     const projectId=await projectReference(db,company.id,body.projectId),documentId=type==='DOCUMENT'?text(body.documentId,'documentId'):null;
     if(documentId){
       await access(request,'documents.read');
@@ -79,7 +101,7 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
       if(!['ISSUED','POSTED'].includes(doc.status))fail(409,'document_not_posted');
     }
     await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'bank_row',row.id,JSON.stringify(row),request.user.id);
-    await db.prepare('UPDATE bank_import_rows SET classification=?,project_id=?,document_id=?,version=version+1 WHERE id=?').run(type,projectId,documentId,row.id);
+    await db.prepare('UPDATE bank_import_rows SET classification=?,project_id=?,document_id=?,matched_entry_id=?,version=version+1 WHERE id=?').run(type,projectId,documentId,type==='EXISTING'?body.entryId:null,row.id);
     return getRow(company.id,request.params.id,row.id);
   }));
   route('POST','/:id/rows/:rowId/post',request=>command(request,'bank.post','bank.post',async company=>{
@@ -88,8 +110,13 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
     if(row.journal_id)return row;
     if(body.version!==row.version)fail(409,'version_conflict');
     if(!row.classification||row.classification==='IGNORE')fail(409,'bank_row_not_ready');
-    let journalId,paymentId=null;
-    if(row.classification==='DOCUMENT'){
+    let journalId,paymentId=null,sourceDocumentId=null;
+    if(row.classification==='EXISTING'){
+      const entry=await existingEntry(request,company.id,row,row.matched_entry_id);
+      journalId=entry.journal_id;
+      const payment=await db.prepare('SELECT id,document_id FROM commercial_payments WHERE company_id=? AND journal_id=? AND voided=FALSE').get(company.id,journalId);
+      paymentId=payment?.id??null;sourceDocumentId=payment?.document_id??null;
+    }else if(row.classification==='DOCUMENT'){
       await access(request,'documents.settle');
       // Reuse precisely the same financial command as document payment entry.
       const settled=await settleDocument(company,{...request,params:{...request.params,id:row.document_id},body:{walletId:row.wallet_id,amount:Math.abs(row.amount),businessDate:row.business_date}});
@@ -104,7 +131,7 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
       await db.prepare('INSERT INTO wallet_entries(id,company_id,wallet_id,amount,kind,reference_id,created_at,journal_id) VALUES(?,?,?,?,?,?,?,?)')
         .run(randomUUID(),company.id,bank.id,row.amount,row.classification,row.id,new Date().toISOString(),entry.id);
     }
-    await db.prepare('UPDATE bank_import_rows SET journal_id=?,payment_id=?,version=version+1 WHERE id=?').run(journalId,paymentId,row.id);
+    await db.prepare('UPDATE bank_import_rows SET journal_id=?,payment_id=?,document_id=COALESCE(document_id,?),version=version+1 WHERE id=?').run(journalId,paymentId,sourceDocumentId,row.id);
     return getRow(company.id,request.params.id,row.id);
   }));
 }

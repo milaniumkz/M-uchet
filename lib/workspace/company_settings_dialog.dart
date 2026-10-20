@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
 
@@ -116,12 +117,12 @@ class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
                           const Text(
                               'Общие реквизиты и налогообложение для всех проектов фирмы.'),
                           const SizedBox(height: 24),
-                          TextField(
+                          TextField(readOnly:!hasCompanyPermission(context,'organization.write'),
                               controller: name,
                               decoration: const InputDecoration(
                                   labelText: 'Юридическое наименование')),
                           const SizedBox(height: 16),
-                          TextField(
+                          TextField(readOnly:!hasCompanyPermission(context,'organization.write'),
                               controller: identifier,
                               keyboardType: TextInputType.number,
                               maxLength: 12,
@@ -137,7 +138,7 @@ class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
                                     value: 'TOO', child: Text('ТОО')),
                                 DropdownMenuItem(value: 'IP', child: Text('ИП'))
                               ],
-                              onChanged: saving ? null : (v) => legalForm = v),
+                              onChanged: saving||!hasCompanyPermission(context,'organization.write') ? null : (v) => legalForm = v),
                           const SizedBox(height: 16),
                           DropdownButtonFormField<String>(
                               initialValue: taxRegime,
@@ -152,37 +153,37 @@ class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
                                     value: 'SIMPLIFIED',
                                     child: Text('Упрощённая декларация'))
                               ],
-                              onChanged: saving ? null : (v) => taxRegime = v),
+                              onChanged: saving||!hasCompanyPermission(context,'organization.write') ? null : (v) => taxRegime = v),
                           const SizedBox(height: 16),
                           SwitchListTile(
                               contentPadding: EdgeInsets.zero,
                               title: const Text('Зарегистрирован по НДС'),
                               value: vat,
-                              onChanged: saving
+                              onChanged: saving||!hasCompanyPermission(context,'organization.write')
                                   ? null
                                   : (v) => setState(() => vat = v)),
                           const SizedBox(height: 16),
-                          TextField(
+                          TextField(readOnly:!hasCompanyPermission(context,'organization.write'),
                               controller: address,
                               decoration: const InputDecoration(
                                   labelText: 'Юридический адрес')),
                           const SizedBox(height: 16),
-                          TextField(
+                          TextField(readOnly:!hasCompanyPermission(context,'organization.write'),
                               controller: iban,
                               decoration: const InputDecoration(
                                   labelText: 'Банковский счёт IBAN')),
                           const SizedBox(height: 16),
-                          TextField(
+                          TextField(readOnly:!hasCompanyPermission(context,'organization.write'),
                               controller: bic,
                               decoration: const InputDecoration(
                                   labelText: 'БИК банка')),
                           const SizedBox(height: 16),
-                          TextField(
+                          TextField(readOnly:!hasCompanyPermission(context,'organization.write'),
                               controller: director,
                               decoration: const InputDecoration(
                                   labelText: 'Руководитель: ФИО')),
                           const SizedBox(height: 16),
-                          TextField(
+                          TextField(readOnly:!hasCompanyPermission(context,'organization.write'),
                               controller: accountant,
                               decoration: const InputDecoration(
                                   labelText: 'Бухгалтер: ФИО')),
@@ -204,7 +205,7 @@ class _CompanySettingsDialogState extends State<CompanySettingsDialog> {
                   onPressed: loading || saving ? null : load,
                   child: const Text('Обновить')),
             FilledButton(
-                onPressed: loading || saving ? null : save,
+                onPressed: loading || saving || !hasCompanyPermission(context,'organization.write') ? null : save,
                 child: Text(saving ? 'Сохраняем…' : 'Сохранить'))
           ]);
 }

@@ -68,7 +68,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 400));
     });
     await tester.pumpAndSettle();
-    expect(find.text('1000.25 KZT'), findsWidgets);
+    expect(find.text('1 000,25 ₸'), findsWidgets);
     await tester.runAsync(() async {
       await tester.tap(find.text('Операции'));
       await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -85,7 +85,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 400));
     });
     await tester.pumpAndSettle();
-    expect(find.text('800.10 KZT'), findsWidgets);
+    expect(find.text('800,10 ₸'), findsWidgets);
     await tester.tap(find.byTooltip('Закрыть'));
     await tester.pumpAndSettle();
     await tester.runAsync(() async {

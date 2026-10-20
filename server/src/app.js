@@ -13,6 +13,7 @@ import { hashPassword, verifyPassword, newToken, hashToken, fail, text, integer,
 import { postJournal, allocate, orderInput, projectReference, registerManualWalletEntries } from './accounting.js';
 import { kinds, permissions } from './resources.js';
 import { registerCommercialRoutes } from './commercial.js';
+import { registerInvitationRoutes } from './invitations.js';
 import { registerEmployeeRoutes } from './employees.js';
 import { registerAssetRoutes } from './assets.js';
 import { resetPassword } from './recovery.js';
@@ -24,7 +25,7 @@ const object = value => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(400, 'object_required');
   return value;
 };
-const publicUser = user => ({ id: user.id, login: user.login, name: user.name });
+const publicUser = user => ({ id: user.id, login: user.login, name: user.name,canCreateCompanies:user.can_create_companies===true });
 
 export async function createApp(options = {}) {
   const dataDir = resolve(options.dataDir ?? process.env.DATA_DIR ?? './var');
@@ -41,7 +42,7 @@ export async function createApp(options = {}) {
     components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } } },
     transform({schema,url,route}) {
       const documented={...schema};
-      if(url.startsWith('/v1/')&&!['/v1/auth/login','/v1/auth/register','/v1/auth/reset-password'].includes(url))documented.security=[{bearerAuth:[]}];
+      if(url.startsWith('/v1/')&&!['/v1/auth/login','/v1/auth/register','/v1/auth/reset-password','/v1/auth/invitations/preview','/v1/auth/invitations/accept'].includes(url))documented.security=[{bearerAuth:[]}];
       if(['POST','PUT'].includes(route.method)&&!url.endsWith('/files'))documented.body={type:'object',additionalProperties:true,description:'See docs/API.md and server/README.md for required fields; typed request schemas are pending.'};
       return {schema:documented,url};
     } });
@@ -121,7 +122,7 @@ export async function createApp(options = {}) {
     if (typeof body.password !== 'string' || body.password.length < 12 || body.password.length > 256) fail(400, 'password_length_12_to_256');
     const password = await hashPassword(body.password);
     const id = randomUUID();
-    try { (await db.prepare('INSERT INTO users VALUES(?,?,?,?,?)').run(id, login, password, name, now())); }
+    try { (await db.prepare('INSERT INTO users(id,login,password,name,created_at,can_create_companies) VALUES(?,?,?,?,?,TRUE)').run(id, login, password, name, now())); }
     catch (error) { if ((await db.prepare('SELECT 1 FROM users WHERE login=?').get(login))) fail(409, 'login_unavailable'); throw error; }
     reply.code(201);
     return { id, login, name };
@@ -144,7 +145,7 @@ export async function createApp(options = {}) {
     return { ok: true };
   });
   app.get('/v1/auth/me', { preHandler: auth }, async request => ({ ...request.user,
-    memberships: (await db.prepare('SELECT company_id AS companyId,role,permissions FROM memberships WHERE user_id=?').all(request.user.id)).map(m => ({ ...m, permissions: JSON.parse(m.permissions) })) }));
+    memberships: (await db.prepare('SELECT company_id AS "companyId",role,permissions FROM memberships WHERE user_id=?').all(request.user.id)).map(m => ({ ...m, permissions: JSON.parse(m.permissions) })) }));
   app.post('/v1/auth/password', { preHandler: auth, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async request => {
     const body = object(request.body);
     if (typeof body.oldPassword !== 'string' || body.oldPassword.length > 256 || typeof body.password !== 'string' || body.password.length < 12 || body.password.length > 256) fail(400, 'invalid_password');
@@ -157,9 +158,10 @@ export async function createApp(options = {}) {
     }));
     return { ok: true, reauthenticationRequired: true };
   });
-  app.get('/v1/companies', { preHandler: auth }, async request => (await db.prepare(`SELECT c.* FROM companies c
-    JOIN memberships m ON m.company_id=c.id WHERE m.user_id=? ORDER BY c.id`).all(request.user.id)));
+  app.get('/v1/companies', { preHandler: auth }, async request => (await db.prepare(`SELECT c.*,m.role,m.permissions FROM companies c
+    JOIN memberships m ON m.company_id=c.id WHERE m.user_id=? ORDER BY c.id`).all(request.user.id)).map(c=>({...c,permissions:JSON.parse(c.permissions)})));
   app.post('/v1/companies', { preHandler: auth }, async (request, reply) => {
+    if(!request.user.canCreateCompanies)fail(403,'company_creation_forbidden');
     const body = object(request.body), name = text(body.name, 'name');
     if (!/^[A-Z]{3}$/.test(body.currency ?? '')) fail(400, 'invalid_currency');
     const key = request.headers['idempotency-key'] === undefined ? null : text(request.headers['idempotency-key'], 'idempotency_key', 128);
@@ -177,7 +179,7 @@ export async function createApp(options = {}) {
       const id = randomUUID();
       await db.prepare('INSERT INTO companies(id,name,currency,created_at) VALUES(?,?,?,?)').run(id, name, body.currency, now());
       await db.prepare("INSERT INTO memberships VALUES(?,?,'owner','[]')").run(id, request.user.id);
-      const result = { id, name, currency: body.currency };
+      const result = { id, name, currency: body.currency, role:'owner',permissions:[] };
       await db.prepare('INSERT INTO audit(company_id,actor_id,action,resource_id,created_at) VALUES(?,?,?,?,?)')
         .run(id, request.user.id, 'company.create', id, now());
       if (key) await db.prepare('INSERT INTO user_commands VALUES(?,?,?,?,?)').run(request.user.id, key, fingerprint, JSON.stringify(result), now());
@@ -187,7 +189,7 @@ export async function createApp(options = {}) {
   });
   app.get('/v1/companies/:companyId/members', { preHandler: auth }, async request => {
     (await owner(request));
-    return (await db.prepare(`SELECT m.user_id AS userId,u.name,m.role,m.permissions FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=?`).all(request.params.companyId)).map(m => ({ ...m, permissions: JSON.parse(m.permissions) }));
+    return (await db.prepare(`SELECT m.user_id AS "userId",u.name,m.role,m.permissions FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=?`).all(request.params.companyId)).map(m => ({ ...m, permissions: JSON.parse(m.permissions) }));
   });
   app.put('/v1/companies/:companyId/members/:userId', { preHandler: auth }, async request => {
     (await owner(request));
@@ -195,9 +197,11 @@ export async function createApp(options = {}) {
     if (!Array.isArray(body.permissions) || body.permissions.some(p => !permissions.includes(p))) fail(400, 'invalid_permissions');
     if (!(await db.prepare('SELECT 1 FROM users WHERE id=?').get(request.params.userId))) fail(404, 'user_not_found');
     return (await transaction(db, async () => {
+      await db.prepare('SELECT id FROM companies WHERE id=? FOR UPDATE').get(request.params.companyId);
       const old = (await db.prepare('SELECT role FROM memberships WHERE company_id=? AND user_id=?').get(request.params.companyId, request.params.userId));
       if (old?.role === 'owner') fail(409, 'owner_membership_protected');
       (await db.prepare(`INSERT INTO memberships VALUES(?,?,'member',?) ON CONFLICT(company_id,user_id) DO UPDATE SET permissions=excluded.permissions`).run(request.params.companyId, request.params.userId, JSON.stringify([...new Set(body.permissions)])));
+      await db.prepare('UPDATE company_invitations SET revoked=TRUE WHERE company_id=? AND accepted_at IS NULL AND login=(SELECT login FROM users WHERE id=?)').run(request.params.companyId,request.params.userId);
       (await audit(request, 'membership.update', request.params.userId));
       return { ok: true };
     }));
@@ -205,9 +209,11 @@ export async function createApp(options = {}) {
   app.delete('/v1/companies/:companyId/members/:userId', { preHandler: auth }, async request => {
     (await owner(request));
     return (await transaction(db, async () => {
+      await db.prepare('SELECT id FROM companies WHERE id=? FOR UPDATE').get(request.params.companyId);
       const old = (await db.prepare('SELECT role FROM memberships WHERE company_id=? AND user_id=?').get(request.params.companyId, request.params.userId));
       if (old?.role === 'owner') fail(409, 'owner_membership_protected');
       (await db.prepare('DELETE FROM memberships WHERE company_id=? AND user_id=?').run(request.params.companyId, request.params.userId));
+      await db.prepare('UPDATE company_invitations SET revoked=TRUE WHERE company_id=? AND login=(SELECT login FROM users WHERE id=?)').run(request.params.companyId,request.params.userId);
       (await audit(request, 'membership.remove', request.params.userId));
       return { ok: true };
     }));
@@ -268,7 +274,7 @@ export async function createApp(options = {}) {
     const id = randomUUID();
     (await db.prepare('INSERT INTO batches(id,company_id,product_id,warehouse_id,scope,quantity,reserved,unit_cost,created_at) VALUES(?,?,?,?,?,?,0,?,?)').run(id, company.id, item.productId, item.warehouseId, parsed.scope, item.quantity, unitCost, now()));
     const amount = item.quantity * unitCost;
-    if (amount) (await postJournal(db, company, { scope: parsed.scope, projectId:parsed.projectId, description: `Receipt ${id}`, lines: [{ account: 'inventory', debit: amount }, { account: 'payables', credit: amount }] }));
+    if (amount) (await postJournal(db, company, { scope: parsed.scope, projectId:parsed.projectId,businessDate:body.businessDate, description: `Receipt ${id}`, lines: [{ account: 'inventory', debit: amount }, { account: 'payables', credit: amount }] }));
     return { id, ...item, unitCost, scope: parsed.scope, projectId:parsed.projectId };
   })));
   app.get('/v1/companies/:companyId/inventory', { preHandler: auth }, async request => {
@@ -404,6 +410,7 @@ export async function createApp(options = {}) {
     reply.type('application/octet-stream').header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
+  registerInvitationRoutes(app,{db,auth,owner,object});
   registerEmployeeRoutes(app,{db,auth,access,command,pageLimit,object});
   registerAssetRoutes(app,{db,auth,access,command,pageLimit,object});
   const commercial=registerCommercialRoutes(app, { db, auth, access, command, pageLimit, object });

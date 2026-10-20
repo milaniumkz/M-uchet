@@ -47,8 +47,9 @@ class _TextPromptDialogState extends State<TextPromptDialog> {
 }
 
 class PeriodStatusDialog extends StatefulWidget {
-  const PeriodStatusDialog({super.key, required this.month});
+  const PeriodStatusDialog({super.key, required this.month,this.allowClose=true,this.allowOpen=true});
   final String month;
+  final bool allowClose,allowOpen;
   @override
   State<PeriodStatusDialog> createState() => _PeriodStatusDialogState();
 }
@@ -90,11 +91,11 @@ class _PeriodStatusDialogState extends State<PeriodStatusDialog> {
         child: const Text('Отмена'),
       ),
       TextButton(
-        onPressed: () => finish('reopen'),
+        onPressed: widget.allowOpen?() => finish('reopen'):null,
         child: const Text('Открыть'),
       ),
       FilledButton(
-        onPressed: () => finish('close'),
+        onPressed: widget.allowClose?() => finish('close'):null,
         child: const Text('Закрыть'),
       ),
     ],

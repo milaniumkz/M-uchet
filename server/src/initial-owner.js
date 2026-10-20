@@ -15,7 +15,7 @@ export async function createInitialOwner(db, input) {
     await db.exec('SELECT pg_advisory_xact_lock(62700322)');
     if (await db.prepare('SELECT 1 FROM users LIMIT 1').get()) fail(409, 'initial_owner_already_exists');
     const user = { id: randomUUID(), login, name };
-    await db.prepare('INSERT INTO users(id,login,password,name,created_at) VALUES(?,?,?,?,?)')
+    await db.prepare('INSERT INTO users(id,login,password,name,created_at,can_create_companies) VALUES(?,?,?,?,?,TRUE)')
       .run(user.id, login, password, name, new Date().toISOString());
     return user;
   });

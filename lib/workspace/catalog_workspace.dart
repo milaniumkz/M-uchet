@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
 import '../backend/rest/repositories.dart';
@@ -98,7 +99,7 @@ class _CatalogWorkspaceState extends State<CatalogWorkspace> {
                   style: const TextStyle(
                       fontSize: 29, fontWeight: FontWeight.bold)),
               FilledButton.icon(
-                  onPressed: loading ? null : () => edit(),
+                  onPressed: loading||!hasCompanyPermission(context,'catalog.write') ? null : () => edit(),
                   icon: const Icon(Icons.add),
                   label: const Text('Добавить'))
             ]),
@@ -148,7 +149,7 @@ class _CatalogWorkspaceState extends State<CatalogWorkspace> {
                   item.data['email']
                 ].whereType<String>().where((v) => v.isNotEmpty).join(' · ')),
                 trailing: IconButton(
-                    tooltip: 'Редактировать запись',
+                    tooltip: hasCompanyPermission(context,'catalog.write')?'Редактировать запись':'Открыть запись',
                     onPressed: () => edit(item),
                     icon: const Icon(Icons.edit_outlined))))),
         if (cursor != null)
@@ -194,7 +195,7 @@ class _ResourceEditorState extends State<_ResourceEditor> {
       padding: const EdgeInsets.only(bottom: 16),
       child: TextFormField(
           initialValue: data[key] as String? ?? '',
-          enabled: !busy && !uncertain,
+          enabled: !busy && !uncertain && hasCompanyPermission(context,'catalog.write'),
           keyboardType: keyboard,
           decoration: InputDecoration(labelText: label),
           onChanged: (v) => data[key] = v.trim()));
@@ -258,7 +259,7 @@ class _ResourceEditorState extends State<_ResourceEditor> {
   Widget build(BuildContext context) => AlertDialog(
           title: Text(widget.previous == null
               ? 'Добавить: ${widget.title}'
-              : 'Изменить запись'),
+              : hasCompanyPermission(context,'catalog.write')?'Изменить запись':'Карточка записи'),
           content: SizedBox(
               width: 520,
               child: SingleChildScrollView(
@@ -282,7 +283,7 @@ class _ResourceEditorState extends State<_ResourceEditor> {
                       field('unit', 'Единица измерения'),
                       TextFormField(
                           initialValue: price,
-                          enabled: !busy && !uncertain,
+                          enabled: !busy && !uncertain && hasCompanyPermission(context,'catalog.write'),
                           keyboardType: const TextInputType.numberWithOptions(
                               decimal: true),
                           decoration:
@@ -300,7 +301,7 @@ class _ResourceEditorState extends State<_ResourceEditor> {
                 onPressed: busy ? null : () => Navigator.pop(context),
                 child: const Text('Отмена')),
             FilledButton(
-                onPressed: busy ? null : save,
+                onPressed: busy||!hasCompanyPermission(context,'catalog.write') ? null : save,
                 child: Text(uncertain ? 'Повторить сохранение' : 'Сохранить'))
           ]);
 }

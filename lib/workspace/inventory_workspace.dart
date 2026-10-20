@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
 import '../backend/rest/retriable_command.dart';
@@ -120,20 +121,20 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
         runSpacing: 12,
         children: [
           FilledButton.icon(
-            onPressed: busy || products.isEmpty || warehouses.isEmpty
+            onPressed: busy || !hasCompanyPermission(context,'inventory.receive') || products.isEmpty || warehouses.isEmpty
                 ? null
                 : () => action('receipt'),
             icon: const Icon(Icons.add),
             label: const Text('Поступление'),
           ),
           OutlinedButton(
-            onPressed: busy || warehouses.length < 2 || products.isEmpty
+            onPressed: busy || !hasCompanyPermission(context,'inventory.move') || warehouses.length < 2 || products.isEmpty
                 ? null
                 : () => action('transfer'),
             child: const Text('Перемещение'),
           ),
           OutlinedButton(
-            onPressed: busy || products.isEmpty || warehouses.isEmpty
+            onPressed: busy || !hasCompanyPermission(context,'inventory.writeoff') || products.isEmpty || warehouses.isEmpty
                 ? null
                 : () => action('writeoff'),
             child: const Text('Списание'),

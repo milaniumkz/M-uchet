@@ -42,25 +42,48 @@ class BackendException implements Exception {
       'invalid_bank_iban':
           'Проверьте IBAN: нужен казахстанский счёт с корректной контрольной суммой.',
       'invalid_bank_bic': 'Проверьте БИК банка.',
-      'asset_policy_required': 'Укажите линейный метод и подтвердите параметры учётной политики.',
-      'asset_number_conflict': 'Этот инвентарный номер уже используется в фирме.',
-      'residual_exceeds_cost': 'Остаточная стоимость не должна превышать первоначальную.',
-      'invalid_depreciation_start': 'Проверьте месяц начала и начисления амортизации.',
+      'company_creation_forbidden':
+          'Создание фирм доступно владельцу системы. Попросите доступ к существующей фирме.',
+      'invalid_invitation':
+          'Приглашение недействительно, отозвано или срок его действия истёк.',
+      'invitation_access_revoked': 'Доступ по этому приглашению уже отозван.',
+      'invalid_credentials': 'Неверный логин или пароль.',
+      'asset_policy_required':
+          'Укажите линейный метод и подтвердите параметры учётной политики.',
+      'asset_number_conflict':
+          'Этот инвентарный номер уже используется в фирме.',
+      'residual_exceeds_cost':
+          'Остаточная стоимость не должна превышать первоначальную.',
+      'invalid_depreciation_start':
+          'Проверьте месяц начала и начисления амортизации.',
       'employee_identifier_conflict': 'Сотрудник с таким ИИН уже есть в фирме.',
       'invalid_employee_dates': 'Проверьте даты рождения, приёма и увольнения.',
-      'invalid_employee_profile': 'Проверьте статус, резидентство и код гражданства.',
-      'invalid_recovery_token': 'Код восстановления недействителен, уже использован или истёк. Получите новый код у администратора.',
-      'password_length_12_to_256': 'Пароль должен содержать от 12 до 256 символов.',
-      'invalid_bank_csv': 'Не удалось разобрать CSV. Проверьте кодировку, разделитель и кавычки.',
-      'invalid_bank_csv_columns': 'Количество колонок в строках CSV не совпадает с заголовком.',
-      'invalid_bank_csv_headers': 'Названия колонок CSV должны быть заполнены и уникальны.',
-      'invalid_bank_mapping': 'Проверьте названия колонок даты, ID, списания, поступления и назначения.',
-      'bank_csv_limit': 'Выписка должна содержать до 500 операций и до 50 колонок.',
-      'invalid_bank_amount': 'Проверьте суммы: нужны положительные значения с точностью до 0,01.',
-      'bank_row_requires_one_direction': 'В строке должно быть заполнено либо списание, либо поступление.',
-      'bank_reference_conflict': 'Этот ID банковской операции уже есть с другими данными. Проверьте выписку и выбранный счёт.',
-      'bank_direction_mismatch': 'Вид операции не соответствует направлению платежа.',
-      'bank_edit_source_required': 'Откройте проведённую оплату или денежную операцию для исправления.',
+      'invalid_employee_profile':
+          'Проверьте статус, резидентство и код гражданства.',
+      'invalid_recovery_token':
+          'Код восстановления недействителен, уже использован или истёк. Получите новый код у администратора.',
+      'password_length_12_to_256':
+          'Пароль должен содержать от 12 до 256 символов.',
+      'invalid_bank_csv':
+          'Не удалось разобрать CSV. Проверьте кодировку, разделитель и кавычки.',
+      'invalid_bank_csv_columns':
+          'Количество колонок в строках CSV не совпадает с заголовком.',
+      'invalid_bank_csv_headers':
+          'Названия колонок CSV должны быть заполнены и уникальны.',
+      'invalid_bank_mapping':
+          'Проверьте названия колонок даты, ID, списания, поступления и назначения.',
+      'bank_csv_limit':
+          'Выписка должна содержать до 500 операций и до 50 колонок.',
+      'invalid_bank_amount':
+          'Проверьте суммы: нужны положительные значения с точностью до 0,01.',
+      'bank_row_requires_one_direction':
+          'В строке должно быть заполнено либо списание, либо поступление.',
+      'bank_reference_conflict':
+          'Этот ID банковской операции уже есть с другими данными. Проверьте выписку и выбранный счёт.',
+      'bank_direction_mismatch':
+          'Вид операции не соответствует направлению платежа.',
+      'bank_edit_source_required':
+          'Откройте проведённую оплату или денежную операцию для исправления.',
       'bank_row_not_ready': 'Сначала сопоставьте операцию.',
       'file_too_large': 'Размер файла не должен превышать 10 МБ.',
       'source_document_edit_required':
@@ -75,9 +98,10 @@ class BackendException implements Exception {
       404 => 'Объект не найден или недоступен.',
       409 => 'Данные изменились. Обновите их и повторите действие.',
       429 => 'Слишком много запросов. Повторите немного позже.',
-      _ => code == 'network_error'
-          ? 'Не удалось связаться с сервером. Проверьте соединение.'
-          : 'Сервер не смог выполнить действие.',
+      _ =>
+        code == 'network_error'
+            ? 'Не удалось связаться с сервером. Проверьте соединение.'
+            : 'Сервер не смог выполнить действие.',
     };
   }
 
@@ -95,9 +119,9 @@ Map<String, dynamic> jsonObject(Object? value) {
 /// Create once per user action and retain for every retry of that action.
 class OperationKey {
   OperationKey()
-      : value = base64UrlEncode(
-          List<int>.generate(32, (_) => Random.secure().nextInt(256)),
-        ).replaceAll('=', '');
+    : value = base64UrlEncode(
+        List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+      ).replaceAll('=', '');
   final String value;
 }
 
@@ -114,7 +138,8 @@ class BackendClient {
         origin.hasFragment ||
         (origin.path.isNotEmpty && origin.path != '/')) {
       throw ArgumentError(
-          'API origin must be HTTPS (HTTP loopback for development).');
+        'API origin must be HTTPS (HTTP loopback for development).',
+      );
     }
   }
 
@@ -122,6 +147,15 @@ class BackendClient {
   final Duration timeout;
   final http.Client _transport;
   String? _token;
+  void Function()? onUnauthorized;
+  void _expireSession() {
+    final hadSession = _token != null;
+    clearSession();
+    if (hadSession) {
+      onUnauthorized?.call();
+    }
+  }
+
   bool get authenticated => _token != null;
 
   void acceptSession(String token) {
@@ -138,32 +172,42 @@ class BackendClient {
   }
 
   Future<Map<String, dynamic>> uploadFile(
-      String companyId, List<int> bytes, String filename) async {
+    String companyId,
+    List<int> bytes,
+    String filename,
+  ) async {
     if (_token == null) {
       throw const BackendException('authentication_required', status: 401);
     }
     if (bytes.length > 10 * 1024 * 1024) {
       throw const BackendException('file_too_large', status: 413);
     }
-    final request = http.MultipartRequest('POST',
-        origin.replace(pathSegments: ['v1', 'companies', companyId, 'files']))
-      ..headers['Authorization'] = 'Bearer $_token'
-      ..files
-          .add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final request =
+        http.MultipartRequest(
+            'POST',
+            origin.replace(
+              pathSegments: ['v1', 'companies', companyId, 'files'],
+            ),
+          )
+          ..headers['Authorization'] = 'Bearer $_token'
+          ..files.add(
+            http.MultipartFile.fromBytes('file', bytes, filename: filename),
+          );
     try {
       final response = await http.Response.fromStream(
-              await _transport.send(request).timeout(timeout))
-          .timeout(timeout);
+        await _transport.send(request).timeout(timeout),
+      ).timeout(timeout);
       final result = jsonDecode(response.body);
       if (response.statusCode == 401) {
-        clearSession();
+        _expireSession();
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw BackendException(
-            result is Map<String, dynamic>
-                ? result['error'] as String? ?? 'request_failed'
-                : 'request_failed',
-            status: response.statusCode);
+          result is Map<String, dynamic>
+              ? result['error'] as String? ?? 'request_failed'
+              : 'request_failed',
+          status: response.statusCode,
+        );
       }
       return jsonObject(result);
     } on TimeoutException {
@@ -180,16 +224,22 @@ class BackendClient {
       throw const BackendException('authentication_required', status: 401);
     }
     try {
-      final response = await _transport.get(
-          origin.replace(
-              pathSegments: ['v1', 'companies', companyId, 'files', id]),
-          headers: {'Authorization': 'Bearer $_token'}).timeout(timeout);
+      final response = await _transport
+          .get(
+            origin.replace(
+              pathSegments: ['v1', 'companies', companyId, 'files', id],
+            ),
+            headers: {'Authorization': 'Bearer $_token'},
+          )
+          .timeout(timeout);
       if (response.statusCode == 401) {
-        clearSession();
+        _expireSession();
       }
       if (response.statusCode != 200) {
-        throw BackendException('file_download_failed',
-            status: response.statusCode);
+        throw BackendException(
+          'file_download_failed',
+          status: response.statusCode,
+        );
       }
       return response.bodyBytes;
     } on TimeoutException {
@@ -232,17 +282,20 @@ class BackendClient {
         result = jsonDecode(response.body);
       } on FormatException {
         if (response.statusCode == 401) {
-          clearSession();
+          _expireSession();
         }
-        throw BackendException('invalid_server_response',
-            status: response.statusCode);
+        throw BackendException(
+          'invalid_server_response',
+          status: response.statusCode,
+        );
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         if (response.statusCode == 401 && authenticated) {
-          clearSession();
+          _expireSession();
         }
-        final error =
-            result is Map<String, dynamic> ? result : const <String, dynamic>{};
+        final error = result is Map<String, dynamic>
+            ? result
+            : const <String, dynamic>{};
         throw BackendException(
           error['error'] is String
               ? error['error'] as String

@@ -15,7 +15,7 @@ try {
   // Save local access securely before committing the synthetic account. Never print credentials.
   await writeFile(credentialFile,JSON.stringify({login:'synthetic-owner@example.test',password}),{flag:'wx',mode:0o600});
   await transaction(db,async()=>{
-   await db.prepare('INSERT INTO users VALUES(?,?,?,?,?)').run(id,'synthetic-owner@example.test',hash,'SYNTHETIC TEST OWNER',new Date().toISOString());
+   await db.prepare('INSERT INTO users(id,login,password,name,created_at,can_create_companies) VALUES(?,?,?,?,?,TRUE)').run(id,'synthetic-owner@example.test',hash,'SYNTHETIC TEST OWNER',new Date().toISOString());
    await db.prepare('INSERT INTO companies(id,name,currency,created_at) VALUES(?,?,?,?)').run(company,'SYNTHETIC TEST COMPANY — NOT REAL','KZT',new Date().toISOString());
    await db.prepare("INSERT INTO memberships VALUES(?,?,'owner','[]')").run(company,id);
   });

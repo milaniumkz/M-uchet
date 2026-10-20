@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
@@ -106,7 +107,7 @@ class _EmployeesWorkspaceState extends State<EmployeesWorkspace> {
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
           ),
           FilledButton.icon(
-            onPressed: busy ? null : () => edit(),
+            onPressed: busy||!hasCompanyPermission(context,'employees.write') ? null : () => edit(),
             icon: const Icon(Icons.person_add_outlined),
             label: const Text('Добавить сотрудника'),
           ),
@@ -323,7 +324,7 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
         padding: const EdgeInsets.only(bottom: 14),
         child: TextField(
           controller: c,
-          enabled: !busy && pending == null,
+          enabled: !busy && pending == null && hasCompanyPermission(context,'employees.write'),
           autocorrect: !private,
           enableSuggestions: !private,
           decoration: InputDecoration(labelText: label),
@@ -356,7 +357,7 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
                 DropdownMenuItem(value: 'ACTIVE', child: Text('Работает')),
                 DropdownMenuItem(value: 'INACTIVE', child: Text('Неактивен')),
               ],
-              onChanged: busy || pending != null
+              onChanged: busy || pending != null || !hasCompanyPermission(context,'employees.write')
                   ? null
                   : (v) => setState(() => status = v!),
             ),
@@ -379,7 +380,7 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
                   ),
                 ),
               ],
-              onChanged: busy || pending != null
+              onChanged: busy || pending != null || !hasCompanyPermission(context,'employees.write')
                   ? null
                   : (v) => setState(
                       () => projectId = v == 'unassigned' ? null : v,
@@ -387,14 +388,14 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
             ),
             CheckboxListTile(
               value: resident,
-              onChanged: busy || pending != null
+              onChanged: busy || pending != null || !hasCompanyPermission(context,'employees.write')
                   ? null
                   : (v) => setState(() => resident = v!),
               title: const Text('Налоговый резидент Казахстана'),
             ),
             CheckboxListTile(
               value: declaration,
-              onChanged: busy || pending != null
+              onChanged: busy || pending != null || !hasCompanyPermission(context,'employees.write')
                   ? null
                   : (v) => setState(() => declaration = v!),
               title: const Text(
@@ -431,7 +432,7 @@ class _EmployeeEditorState extends State<EmployeeEditor> {
         child: const Text('Отмена'),
       ),
       FilledButton(
-        onPressed: busy ? null : save,
+        onPressed: busy||!hasCompanyPermission(context,'employees.write') ? null : save,
         child: Text(
           pending == null ? 'Сохранить сотрудника' : 'Повторить сохранение',
         ),

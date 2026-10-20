@@ -1,3 +1,4 @@
+import 'company_access.dart';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
 
@@ -126,7 +127,7 @@ class _MoneyEntriesDialogState extends State<MoneyEntriesDialog> {
                               Row(mainAxisSize: MainAxisSize.min, children: [
                             Text(
                                 '${((e['amount'] as num) / 100).toStringAsFixed(2)} ${widget.currency}'),
-                            if (e['journal_id'] != null &&
+                            if (hasCompanyPermission(context,'wallets.transact')&&e['journal_id'] != null &&
                                 ['INCOME', 'EXPENSE', 'CAPITAL']
                                     .contains(e['kind']))
                               IconButton(

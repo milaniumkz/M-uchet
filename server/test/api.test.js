@@ -218,7 +218,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 14);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 18);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -789,4 +789,122 @@ test('employee profiles have private permissions, validated dates, exact pay and
  assert.equal((await f.call('GET',f.prefix+'/employees',undefined,catalogReader.token)).status,403);
  assert.equal((await f.api('POST','/resources/employees',{data:{name:'BYPASS'}})).status,404);
  assert.equal((await f.api('POST','/employees',{...body,identifier:'000000000002',birthDate:'2027-01-01'})).status,400);
+});
+
+test('owner invitations create scoped members without public registration and never restore revoked access',async t=>{
+ const f=await fixture(t),input={login:'invited-reader@example.test',name:'SYNTHETIC INVITED READER',permissions:['reports.read','projects.read']};
+ const invitation=await f.api('POST','/invitations',input);assert.equal(invitation.status,200);
+ const raw=invitation.body.token,stored=await f.app.db.prepare('SELECT * FROM company_invitations WHERE id=?').get(invitation.body.id);
+ assert.notEqual(stored.token_hash,raw);assert.equal((await f.api('GET','/invitations')).body.items[0].token_hash,undefined);
+ const preview=await f.call('POST','/v1/auth/invitations/preview',{token:raw});assert.equal(preview.status,200);assert.equal(preview.body.accountExists,false);
+ const password=randomUUID(),accepted=await f.call('POST','/v1/auth/invitations/accept',{token:raw,password});assert.equal(accepted.status,200);
+ assert.equal((await f.call('POST','/v1/auth/invitations/accept',{token:raw,password})).status,200);
+ const login=(await f.call('POST','/v1/auth/login',{login:input.login,password})).body;
+ const companies=(await f.call('GET','/v1/companies',undefined,login.token)).body;assert.equal(companies.length,1);assert.equal(companies[0].id,f.company.id);
+ assert.equal((await f.call('GET',f.prefix+'/reports/projects',undefined,login.token)).status,200);
+ assert.equal((await f.call('GET',f.prefix+'/employees',undefined,login.token)).status,403);
+ assert.equal((await f.call('POST','/v1/companies',{name:'FORBIDDEN MEMBER FIRM',currency:'KZT'},login.token)).status,403);
+ assert.equal((await f.call('GET','/v1/auth/me',undefined,login.token)).body.memberships[0].companyId,f.company.id);
+ assert.ok((await f.api('GET','/members')).body.some(m=>m.userId===login.user.id));
+ assert.equal((await f.call('POST',f.prefix+'/invitations',input,login.token)).status,403);
+ assert.equal((await f.api('DELETE',`/members/${login.user.id}`)).status,200);
+ assert.equal((await f.call('GET','/v1/companies',undefined,login.token)).body.length,0);
+ assert.equal((await f.call('POST','/v1/companies',{name:'STILL FORBIDDEN',currency:'KZT'},login.token)).status,403);
+ assert.equal((await f.call('POST','/v1/auth/invitations/accept',{token:raw,password})).status,400);
+ assert.equal((await f.api('DELETE',`/members/${f.owner.id}`)).status,409);
+});
+
+test('inviting an existing account requires its password, preserves credentials and respects revocation',async t=>{
+ const f=await fixture(t),existing=await f.user('existing-invite@example.test');
+ const create=async()=>f.api('POST','/invitations',{login:'existing-invite@example.test',name:'SYNTHETIC INVITE',permissions:['catalog.read']});
+ const first=(await create()).body,second=(await create()).body;
+ assert.equal((await f.call('POST','/v1/auth/invitations/preview',{token:first.token})).status,400);
+ assert.equal((await f.call('POST','/v1/auth/invitations/preview',{token:second.token})).body.accountExists,true);
+ assert.equal((await f.call('POST','/v1/auth/invitations/accept',{token:second.token,password:'SYNTHETIC WRONG PASSWORD'})).status,401);
+ assert.equal((await f.call('POST','/v1/auth/invitations/accept',{token:second.token,password:'correct-horse-battery'})).status,200);
+ assert.equal((await f.call('GET','/v1/auth/me',undefined,existing.token)).status,200,'existing session/password are preserved');
+ const third=(await create()).body;
+ await f.api('PUT',`/members/${existing.id}`,{permissions:['reports.read']});
+ assert.equal((await f.call('POST','/v1/auth/invitations/accept',{token:third.token,password:'correct-horse-battery'})).status,400);
+ const fourth=(await create()).body;await f.api('POST',`/invitations/${fourth.id}/revoke`,{});
+ assert.equal((await f.call('POST','/v1/auth/invitations/accept',{token:fourth.token,password:'correct-horse-battery'})).status,400);
+});
+
+
+test('money commands preserve an explicit historical business date and transfer register links',async t=>{
+ const f=await fixture(t),source=(await f.api('POST','/wallets',{name:'SYNTHETIC HISTORIC BANK'})).body,target=(await f.api('POST','/wallets',{name:'SYNTHETIC HISTORIC CASH'})).body;
+ const income=await f.api('POST',`/wallets/${source.id}/transactions`,{type:'INCOME',amount:10000,description:'SYNTHETIC HISTORIC INCOME',businessDate:'2026-01-10'});assert.equal(income.status,200);
+ assert.equal((await f.api('GET','/reports/profit-loss?from=2026-01-01&to=2026-01-31')).body.revenue,10000);
+ assert.equal((await f.api('GET','/reports/profit-loss?from=2026-02-01&to=2026-02-28')).body.revenue,0);
+ const transfer=await f.api('POST','/wallet-transfers',{sourceWalletId:source.id,targetWalletId:target.id,amount:4000,businessDate:'2026-01-12'});assert.equal(transfer.status,200);
+ const rows=await f.app.db.prepare('SELECT e.*,j.business_date FROM wallet_entries e JOIN journal j ON j.id=e.journal_id WHERE e.reference_id=?').all(transfer.body.id);assert.equal(rows.length,2);assert.ok(rows.every(r=>r.business_date==='2026-01-12'));
+ const bad=await f.api('POST',`/wallets/${source.id}/transactions`,{type:'EXPENSE',amount:100,description:'INVALID DATE',businessDate:'2026-02-30'});assert.equal(bad.status,400);
+ assert.equal((await f.api('GET','/wallets')).body.items.find(w=>w.id===source.id).balance,6000);
+});
+
+
+test('cash transfer correction updates both wallet registers and respects old closed periods',async t=>{
+ const f=await fixture(t),a=(await f.api('POST','/wallets',{name:'SYNTHETIC BANK A'})).body,b=(await f.api('POST','/wallets',{name:'SYNTHETIC CASH B'})).body,c=(await f.api('POST','/wallets',{name:'SYNTHETIC CASH C'})).body;
+ await f.api('POST',`/wallets/${a.id}/transactions`,{type:'CAPITAL',amount:10000,description:'SYNTHETIC CAPITAL'});
+ const transfer=(await f.api('POST','/wallet-transfers',{sourceWalletId:a.id,targetWalletId:b.id,amount:4000,businessDate:'2026-01-10'})).body;
+ const old=(await f.api('GET',`/wallet-transfers/${transfer.id}`)).body;assert.equal(old.revision,0);
+ await f.api('POST','/periods/2026-01/close',{reason:'SYNTHETIC CLOSE'});
+ const update={sourceWalletId:a.id,targetWalletId:c.id,amount:2500,businessDate:'2026-01-20',expectedRevision:0,reason:'SYNTHETIC TRANSFER CORRECTION'};
+ const key=randomUUID(),edited=await f.api('PUT',`/wallet-transfers/${transfer.id}`,update,key);assert.equal(edited.status,200);assert.equal(edited.body.revision,1);
+ assert.deepEqual((await f.api('PUT',`/wallet-transfers/${transfer.id}`,update,key)).body,edited.body);
+ const balances=(await f.api('GET','/wallets')).body.items;assert.equal(balances.find(w=>w.id===a.id).balance,7500);assert.equal(balances.find(w=>w.id===b.id).balance,0);assert.equal(balances.find(w=>w.id===c.id).balance,2500);
+ assert.equal((await f.api('PUT',`/wallet-transfers/${transfer.id}`,update)).status,409);
+ assert.equal((await f.api('PUT',`/wallet-transfers/${transfer.id}`,{...update,expectedRevision:1,amount:100000})).status,409);
+ assert.equal((await f.api('GET',`/wallet-transfers/${transfer.id}`)).body.amount,2500);
+ const row=(await f.api('GET',`/wallets/${c.id}/entries`)).body.items[0];assert.equal(row.amount,2500);assert.equal(row.business_date,'2026-01-20');
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.netProfit,0);
+});
+
+test('cash recount keeps the observed closing snapshot and changes no money',async t=>{
+ const f=await fixture(t),wallet=(await f.api('POST','/wallets',{name:'SYNTHETIC CASH'})).body;
+ await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'CAPITAL',amount:10000,description:'SYNTHETIC CAPITAL'});
+ const shift=(await f.api('POST','/shifts',{walletId:wallet.id})).body;
+ const closed=(await f.api('POST',`/shifts/${shift.id}/close`,{countedAmount:9000})).body;assert.equal(closed.expectedAmount,10000);assert.equal(closed.difference,-1000);
+ await f.api('POST',`/wallets/${wallet.id}/transactions`,{type:'INCOME',amount:1000,description:'SYNTHETIC LATER INCOME'});
+ const corrected=await f.api('PUT',`/shifts/${shift.id}`,{countedAmount:9500,reason:'SYNTHETIC COUNT CORRECTION'});assert.equal(corrected.status,200);assert.equal(corrected.body.difference,-500);
+ const saved=(await f.api('GET','/shifts')).body.items.find(s=>s.id===shift.id);assert.equal(saved.expected_balance,10000);assert.equal(saved.closing,9500);assert.equal(saved.closed_by,f.owner.id);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,11000);
+ const other=await f.user('cash-other@example.test');await f.api('PUT',`/members/${other.id}`,{permissions:['shifts.write']});
+ assert.equal((await f.call('PUT',f.prefix+`/shifts/${shift.id}`,{countedAmount:0,reason:'FORBIDDEN'},other.token,randomUUID())).status,403);
+});
+
+test('explicit wallet balance correction has a dated ledger register entry and leaves profit unchanged',async t=>{
+ const f=await fixture(t),wallet=(await f.api('POST','/wallets',{name:'SYNTHETIC CASH'})).body;
+ const corrected=await f.api('PUT',`/wallets/${wallet.id}`,{name:'SYNTHETIC RENAMED CASH',balance:3000,businessDate:'2026-01-01',reason:'SYNTHETIC OPENING CORRECTION'});assert.equal(corrected.status,200);
+ const entries=(await f.api('GET',`/wallets/${wallet.id}/entries`)).body.items;assert.equal(entries.length,1);const entry=entries[0];assert.equal(entry.kind,'BALANCE_EDIT');assert.equal(entry.amount,3000);assert.equal(entry.business_date,'2026-01-01');assert.ok(entry.journal_id);
+ assert.equal((await f.api('GET','/reports/profit-loss?from=2026-01-01&to=2026-01-31')).body.netProfit,0);
+});
+
+test('bank reconciliation links existing money without duplicating journals and rejects duplicate or stale matches',async t=>{
+ const f=await fixture(t), w=(await f.api('POST','/wallets',{name:'Existing bank'})).body;
+ const entry=(await f.api('POST',`/wallets/${w.id}/transactions`,{type:'INCOME',amount:12345,description:'Already entered',businessDate:'2026-10-20'})).body;
+ const entries=(await f.api('GET',`/wallets/${w.id}/entries`)).body.items;
+ const source=entries.find(e=>e.amount===12345);assert.ok(source);
+ const imported=(await f.api('POST','/bank-imports',{walletId:w.id,csv:'date;reference;debit;credit;description\n2026-10-20;existing-1;0;123.45;Existing payment\n2026-10-20;existing-2;0;123.45;Duplicate bank reference'})).body;
+ const rows=(await f.api('GET',`/bank-imports/${imported.id}`)).body.items;
+ const path=r=>`/bank-imports/${imported.id}/rows/${r.id}`;
+ const candidates=await f.api('GET',path(rows[0])+'/candidates');assert.equal(candidates.status,200);assert.equal(candidates.body.items[0].id,source.id);
+ const before=(await f.api('GET','/accounting/journal')).body.items.length;
+ const review=await f.api('PUT',path(rows[0]),{version:1,classification:'EXISTING',entryId:source.id});assert.equal(review.status,200);
+ assert.equal((await f.api('POST',path(rows[0])+'/post',{version:2})).status,200);
+ assert.equal((await f.api('POST',path(rows[0])+'/post',{version:2})).status,200);
+ assert.equal((await f.api('GET','/accounting/journal')).body.items.length,before);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,12345);
+ assert.equal((await f.api('GET',path(rows[1])+'/candidates')).body.items.length,0);
+ assert.equal((await f.api('PUT',path(rows[1]),{version:1,classification:'EXISTING',entryId:source.id})).status,409);
+ const wrong=(await f.api('POST',`/wallets/${w.id}/transactions`,{type:'INCOME',amount:100,description:'Other date',businessDate:'2026-10-19'})).body;
+ const wrongEntry=(await f.api('GET',`/wallets/${w.id}/entries`)).body.items.find(e=>e.amount===100);
+ assert.equal((await f.api('PUT',path(rows[1]),{version:1,classification:'EXISTING',entryId:wrongEntry.id})).status,409);
+ assert.equal(entry.amount,12345);assert.equal(wrong.amount,100);
+ const another=(await f.api('POST','/bank-imports',{walletId:w.id,csv:'date;reference;debit;credit;description\n2026-10-19;stale-entry;0;1.00;Stale test'})).body;
+ const stale=(await f.api('GET',`/bank-imports/${another.id}`)).body.items[0],stalePath=`/bank-imports/${another.id}/rows/${stale.id}`;
+ assert.equal((await f.api('PUT',stalePath,{version:1,classification:'EXISTING',entryId:wrongEntry.id})).status,200);
+ await f.api('PUT',`/wallets/${w.id}/entries/${wrongEntry.id}`,{type:'INCOME',amount:101,description:'Changed before reconciliation',businessDate:'2026-10-19'});
+ assert.equal((await f.api('POST',stalePath+'/post',{version:2})).status,409);
+ assert.equal((await f.api('GET',`/bank-imports/${another.id}`)).body.items[0].journal_id,null);
 });
