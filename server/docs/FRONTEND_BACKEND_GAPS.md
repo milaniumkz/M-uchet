@@ -4,7 +4,7 @@
 
 | Область клиента | Точки входа | Новый API / оставшаяся работа |
 |---|---|---|
-| Startup | `lib/main.dart`, `lib/backend/firebase/firebase_config.dart` | Сохранена блокировка initFirebase. Нужен новый bootstrap, конфигурация API и session state |
+| Startup | `lib/main.dart`, `lib/backend/firebase/firebase_config.dart` | Основной main.dart запускает независимый REST workspace (вход, фирмы, проекты, доходы/расходы); прежний Firebase bootstrap не запускается. Остальные исходные экраны ещё переносятся |
 | Авторизация | `lib/backend/api_requests/api_calls.dart`, `lib/auth/firebase_auth/` | Новый register/login/me/logout/password существует. TokenCall и все Firebase user streams надо заменить, права не брать из тела login |
 | Модели и запросы | `lib/backend/schema/`, `lib/backend/backend.dart`, `firestore_cache*` | Заменить DocumentReference/Query/Timestamp/streams на DTO и репозитории. Универсальный REST CRUD не совместим с Firestore SDK |
 | Права и компании | `utils/user_access_context.dart`, `company_membership_adapter.dart`, `role_assignment_support.dart`, `default_company_roles.dart` | Новый сервер использует membership на компанию, owner не является глобальным superadmin. Нужна явная таблица соответствия старых UI-permissions новым серверным правам |

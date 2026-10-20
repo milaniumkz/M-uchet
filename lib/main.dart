@@ -1,3 +1,4 @@
+import 'main_server.dart' as independent;
 import 'dart:async';
 
 import 'package:provider/provider.dart';
@@ -22,12 +23,9 @@ import '/utils/browser_location.dart';
 import '/utils/device_management_support.dart';
 import '/utils/effective_company_support.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  GoRouter.optionURLReflectsImperativeAPIs = true;
-  usePathUrlStrategy();
-  runApp(_BootstrapGateApp(launchUri: currentBrowserUri()));
-}
+// The default entry point uses the independently authenticated PostgreSQL API.
+// Legacy widgets below remain available while their adapters are migrated.
+void main() => independent.main();
 
 class _BootstrapGateApp extends StatefulWidget {
   const _BootstrapGateApp({required this.launchUri});
