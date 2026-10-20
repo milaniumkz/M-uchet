@@ -1692,7 +1692,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           ),
                           Text('Доходы: ${money(p['revenue'])}'),
                           Text(
-                            'Расходы и себестоимость: ${money((p['expenses'] as num) + (p['cogs'] as num))}',
+                            'Расходы и себестоимость: ${money(p['costs'] ?? 0)}',
                           ),
                           Text(
                             'Прибыль: ${money(p['netProfit'])}',
@@ -1724,15 +1724,16 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   );
   String money(Object? value) => moneyText(value as num, company!.currency);
   Widget metric(String title, String key) {
-    final items = (report!['items'] as List).map(jsonObject);
-    final amount = items.fold<num>(
-      0,
-      (sum, p) =>
-          sum +
-          (key == 'costs'
-              ? (p['expenses'] as num) + (p['cogs'] as num)
-              : (p[key] as num)),
+    final rows = report!['items'] as List;
+    final summary = jsonObject(
+      report!['selectionTotal'] ??
+          (selected == null
+              ? report!['total']
+              : rows.isEmpty
+              ? <String, dynamic>{}
+              : rows.first),
     );
+    final amount = summary[key] as num? ?? 0;
     return Container(
       width: 290,
       padding: const EdgeInsets.all(24),

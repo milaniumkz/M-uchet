@@ -323,7 +323,13 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
           ['Показатель', 'Сумма'],
           ...{
             'revenue': 'Доходы',
+            if (report!.containsKey('salesRevenue'))
+              'salesRevenue': 'Доходы от продаж',
+            if (report!.containsKey('otherIncome'))
+              'otherIncome': 'Прочие доходы',
             'cogs': 'Себестоимость',
+            if (report!.containsKey('grossProfit'))
+              'grossProfit': 'Валовая прибыль',
             'expenses': 'Расходы',
             'netProfit': 'Прибыль',
           }.entries.map(
@@ -542,6 +548,15 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
             metric('Прибыль', 'netProfit'),
           ],
         ),
+        if (report!.containsKey('salesRevenue') &&
+            report!.containsKey('otherIncome') &&
+            report!.containsKey('grossProfit'))
+          Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Text(
+              'Доходы от продаж: ${moneyText(report!['salesRevenue'] as num, widget.currency)} · Прочие доходы: ${moneyText(report!['otherIncome'] as num, widget.currency)} · Валовая прибыль: ${moneyText(report!['grossProfit'] as num, widget.currency)}',
+            ),
+          ),
         const SizedBox(height: 24),
         const Text(
           'Оборотно-сальдовая ведомость',

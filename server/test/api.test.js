@@ -1119,8 +1119,11 @@ test('numeric KZ income, returns, costs and expenses reconcile across project an
  await entry(project.id,[{account:'7210',debit:777},{account:'3310',credit:777}],undefined,'MANAGEMENT');
  const query='?from=2026-01-01&to=2026-01-31';
  let report=(await f.api('GET','/reports/projects'+query)).body;
- assert.deepEqual(report.total,{revenue:9000,cogs:3000,expenses:2400,grossProfit:6000,netProfit:3600});
+ assert.deepEqual(report.total,{revenue:9000,salesRevenue:8800,otherIncome:200,cogs:3000,expenses:2400,costs:5400,grossProfit:5800,netProfit:3600});
  assert.equal(report.items.find(p=>p.projectId===project.id).netProfit,3500);
+ const selectedReport=(await f.api('GET','/reports/projects'+query+'&projectId='+project.id)).body;
+ assert.deepEqual(selectedReport.selectionTotal,{revenue:8500,salesRevenue:8500,otherIncome:0,cogs:3000,expenses:2000,costs:5000,grossProfit:5500,netProfit:3500});
+ assert.equal(selectedReport.total.revenue,9000);
  assert.equal(report.items.find(p=>p.projectId===null).netProfit,100);
  const pl=(await f.api('GET','/reports/profit-loss'+query)).body;
  for(const [key,value] of Object.entries(report.total))assert.equal(pl[key],value);

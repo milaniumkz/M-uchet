@@ -30,7 +30,7 @@ export function registerProjectRoutes({ route, db, access, command, object }) {
   route('GET', '/reports/projects', async request => {
     await access(request,'reports.read');
     const companyId = request.params.companyId, ledgerScope = scope(request.query.scope);
-    const from = businessDate(request.query.from ?? '1900-01-01'), to = businessDate(request.query.to ?? '9999-12-31');
+    const from = businessDate(request.query.from ?? '0001-01-01'), to = businessDate(request.query.to ?? '9999-12-31');
     if (from > to) fail(400,'invalid_date_range');
     const selected = request.query.projectId;
     if (selected && selected !== 'unassigned') await projectReference(db,companyId,selected);
@@ -45,7 +45,8 @@ export function registerProjectRoutes({ route, db, access, command, object }) {
       return {...item,...profitResult(amounts)};
     });
     const total = profitResult(totals);
+    const selectionTotal = selected ? profitResult(buckets.get(selected==='unassigned'?null:selected).amounts) : total;
     return { scope:ledgerScope,from,to,currency:(await access(request,'reports.read')).currency,
-      items:selected?items.filter(p=>p.projectId===(selected==='unassigned'?null:selected)):items,total };
+      items:selected?items.filter(p=>p.projectId===(selected==='unassigned'?null:selected)):items,total,selectionTotal };
   });
 }
