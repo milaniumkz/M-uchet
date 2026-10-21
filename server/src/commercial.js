@@ -1,3 +1,4 @@
+import { registerPurchaseReturns, returnReductions, valuePurchaseReturns } from './purchase-returns.js';
 import { isPurchaseKind, purchaseItems, syncPurchaseStock } from './purchase-stock.js';
 import { readSnapshot } from './db.js';
 import { planSettlements } from './settlement-planner.js';
@@ -74,12 +75,14 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         `SELECT COALESCE(SUM(CASE WHEN kind='REFUND' THEN -amount ELSE amount END),0) AS paid FROM commercial_payments WHERE company_id=? AND voided=FALSE AND (document_id=? OR document_id IN (SELECT id FROM commercial_documents WHERE company_id=? AND source_invoice_id=?))`,
       )
       .get(doc.company_id, doc.source_invoice_id ?? doc.id, doc.company_id, doc.source_invoice_id ?? doc.id);
+    const returned = (await returnReductions(db,doc)).reduce((sum,r)=>sum+r.amount,0);
     const fulfilled = doc.kind === 'SALE_INVOICE' && Boolean(await db.prepare("SELECT 1 FROM commercial_documents WHERE company_id=? AND source_invoice_id=? AND status='POSTED'").get(doc.company_id, doc.id));
     return {
       ...doc,
       paid,
-      outstanding: doc.status === 'CANCELLED' || fulfilled ? 0 : Math.max(0, doc.data.total - paid),
-      customerCredit: fulfilled ? 0 : Math.max(0, paid - (doc.status === 'CANCELLED' ? 0 : doc.data.total)),
+      returned,
+      outstanding: doc.status === 'CANCELLED' || fulfilled ? 0 : Math.max(0, doc.data.total - returned - paid),
+      customerCredit: fulfilled ? 0 : Math.max(0, paid - (doc.status === 'CANCELLED' ? 0 : doc.data.total-returned)),
     };
   };
   const input = async (company, body, kind, previous) => {
@@ -231,8 +234,9 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     }
   };
   // Recompute document recognition; actual cash payments retain their identities.
-  const projectDocument = async (company, doc, request) => {
+  const projectDocument = async (company, doc, request, {editedReturnId} = {}) => {
     await syncPurchaseStock(db, company, doc, () => access(request, 'inventory.receive'));
+    const returns = await valuePurchaseReturns(db,doc,request,editedReturnId);
     for (const posting of await db
       .prepare(
         'SELECT p.id,j.* FROM commercial_postings p JOIN journal j ON j.id=p.journal_id WHERE p.company_id=? AND p.document_id=? AND p.active=TRUE',
@@ -285,9 +289,17 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         lines.filter((l) => (l.debit ?? 0) + (l.credit ?? 0) > 0),
       );
     }
+    for(const row of returns) {
+      if(!row.data.total)continue;
+      await recordPosting(company,doc,`Возврат товаров ${row.number}`, [
+        {account:'payables',debit:row.data.total},
+        {account:'inventory',credit:row.data.cost},
+        ...(row.data.vatTreatment==='PENDING'&&row.data.vat?[{account:'pending_input_vat',credit:row.data.vat}]:[]),
+      ].filter(l=>(l.debit??0)+(l.credit??0)>0),row.business_date);
+    }
     const plan = planSettlements({
       recognized, total: doc.data.total, recognitionDate: doc.business_date,
-      payments: await relatedPayments(doc),
+      payments: await relatedPayments(doc), reductions: await returnReductions(db,doc),
     });
     for (const { payment, debtAmount } of plan.allocations) {
       let basis = doc;
@@ -295,6 +307,11 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         basis = await get(company.id, payment.document_id);
       await replacePayment(company, payment, basis, debtAmount);
     }
+    for(const {reduction,advanceAmount} of plan.adjustments)if(advanceAmount)
+      await recordPosting(company,doc,'Требование к поставщику после возврата',[
+        {account:'supplier_advances',debit:advanceAmount},
+        {account:'payables',credit:advanceAmount},
+      ],reduction.business_date);
     const allocation = plan.applied;
     if (allocation)
       await recordPosting(
@@ -320,6 +337,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
           )
           .get(doc.company_id, doc.id)) ?? doc)
       : doc;
+  registerPurchaseReturns(app,{db,auth,access,command,object,get,dto,projectDocument});
   route('POST', '/preview', async (request) => {
     const company = await access(request, 'documents.write'),
       body = object(request.body);
@@ -363,7 +381,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       COALESCE(sum(CASE WHEN d.status IN ('ISSUED','POSTED') AND NOT
         (d.kind='SALE_INVOICE' AND EXISTS (SELECT 1 FROM commercial_documents child
           WHERE child.company_id=d.company_id AND child.source_invoice_id=d.id AND child.status='POSTED'))
-        THEN greatest(0,(d.data->>'total')::numeric - COALESCE((SELECT sum(CASE WHEN p.kind='REFUND' THEN -p.amount ELSE p.amount END) FROM commercial_payments p
+        THEN greatest(0,(d.data->>'total')::numeric - COALESCE((SELECT sum((r.data->>'total')::numeric) FROM purchase_returns r WHERE r.company_id=d.company_id AND r.document_id=d.id AND r.status='POSTED'),0) - COALESCE((SELECT sum(CASE WHEN p.kind='REFUND' THEN -p.amount ELSE p.amount END) FROM commercial_payments p
           WHERE p.company_id=d.company_id AND NOT p.voided AND
             (p.document_id=COALESCE(d.source_invoice_id,d.id) OR p.document_id IN (SELECT child.id FROM commercial_documents child WHERE child.company_id=d.company_id AND child.source_invoice_id=COALESCE(d.source_invoice_id,d.id)))),0)) ELSE 0 END),0) AS outstanding
       FROM filtered d`).get(...params);
@@ -411,10 +429,10 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     return {counterparty:{...party,data:JSON.parse(party.data)},scope:ledgerScope,from,to,accounts:accounts.map(account=>balances.find(b=>b.account===account)??{account,opening:0,debit:0,credit:0,closing:0}),items:rows,
       nextCursor:rows.length===limit?Buffer.from(JSON.stringify({date:rows.at(-1).business_date,id:rows.at(-1).id})).toString('base64url'):null};
   }));
-  route('GET', '/:id', async (request) => {
+  route('GET', '/:id', request => readSnapshot(db, async () => {
     await access(request, 'documents.read');
     return dto(await get(request.params.companyId, request.params.id));
-  });
+  }));
   route('POST', '', (request) =>
     command(request, 'documents.write', 'document.create', async (company) =>
       dto(await create(request, company, object(request.body), request.body.kind)),
@@ -524,7 +542,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       const current = await dto(basis.status === 'POSTED' ? basis : doc);
       if (kind === 'PAYMENT' && amount > current.outstanding) fail(409, 'overpayment');
       planSettlements({recognized:basis.kind !== 'SALE_INVOICE' && basis.status === 'POSTED', total:basis.data.total,
-        recognitionDate:basis.business_date, payments:[...await relatedPayments(basis), {id,amount,business_date:date,kind}]});
+        recognitionDate:basis.business_date, reductions:await returnReductions(db,basis), payments:[...await relatedPayments(basis), {id,amount,business_date:date,kind}]});
       const sale = (!isPurchaseKind(basis.kind)) !== (kind === 'REFUND'),
         advance = basis.kind === 'SALE_INVOICE' || basis.status !== 'POSTED' || date < basis.business_date;
       const account = !isPurchaseKind(basis.kind)
@@ -620,7 +638,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         if (old.voided === voided) return { id: old.id, document: await dto(doc) };
         const basis = await projectionBasis(doc), payments = await relatedPayments(basis);
         planSettlements({recognized:basis.kind !== 'SALE_INVOICE' && basis.status === 'POSTED',total:basis.data.total,
-          recognitionDate:basis.business_date, payments:voided ? payments.filter(p=>p.id!==old.id) : [...payments,old]});
+          recognitionDate:basis.business_date, reductions:await returnReductions(db,basis), payments:voided ? payments.filter(p=>p.id!==old.id) : [...payments,old]});
         const source = await db
           .prepare('SELECT * FROM journal WHERE company_id=? AND id=?')
           .get(company.id, voided ? old.journal_id : old.void_journal_id);

@@ -35,7 +35,7 @@ void main() {
           RealNetwork(),
         ),
       );
-      late String companyId, number, projectId;
+      late String companyId, number, projectId, returnNumber;
       await tester.runAsync(() async {
         await IdentityRepository(
           api,
@@ -111,6 +111,70 @@ void main() {
           },
         );
         number = document['number'] as String;
+        final supplier = await post(
+              ['resources', 'suppliers'],
+              {
+                'data': {'name': 'SEARCH RETURN SUPPLIER'},
+              },
+            ),
+            product = await post(
+              ['resources', 'nomenklatura'],
+              {
+                'data': {'name': 'SEARCH RETURN PRODUCT'},
+              },
+            ),
+            warehouse = await post(
+              ['resources', 'warehouses'],
+              {
+                'data': {'name': 'SEARCH RETURN WAREHOUSE'},
+              },
+            );
+        var purchase = await post(
+          ['commercial-documents'],
+          {
+            'kind': 'PURCHASE_GOODS',
+            'counterpartyId': supplier['id'],
+            'businessDate': '2026-01-01',
+            'items': [
+              {
+                'productId': product['id'],
+                'warehouseId': warehouse['id'],
+                'quantity': '2',
+                'unitPrice': 100,
+              },
+            ],
+          },
+        );
+        purchase = await post([
+          'commercial-documents',
+          purchase['id'] as String,
+          'post',
+        ], {});
+        final batches =
+            jsonObject(
+                  await api.request('GET', [
+                    ...base,
+                    'commercial-documents',
+                    purchase['id'] as String,
+                    'returns',
+                  ]),
+                )['batches']
+                as List;
+        final returned = await post(
+          ['commercial-documents', purchase['id'] as String, 'returns'],
+          {
+            'documentVersion': purchase['version'],
+            'businessDate': '2026-01-02',
+            'reason': 'SEARCH RETURN REASON',
+            'lines': [
+              {
+                'batchId': jsonObject(batches.single)['batch_id'],
+                'quantity': 1,
+              },
+            ],
+          },
+        );
+        returnNumber = jsonObject(returned['item'])['number'] as String;
         await IdentityRepository(api).logout();
       });
       Future<void> wait() async {
@@ -166,6 +230,11 @@ void main() {
         ),
         findsOneWidget,
       );
+      await click(find.byTooltip('Закрыть'));
+      await search(returnNumber);
+      await click(find.widgetWithText(ListTile, returnNumber));
+      expect(find.text('SEARCH RETURN REASON'), findsOneWidget);
+      expect(find.text('Вернуть товар поставщику'), findsOneWidget);
       await click(find.byTooltip('Закрыть'));
       await search('SEARCH COPPER');
       await click(find.widgetWithText(ListTile, 'SEARCH COPPER'));

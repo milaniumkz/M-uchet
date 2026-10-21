@@ -1,3 +1,4 @@
+import 'purchase_returns.dart';
 import '../backend/rest/repositories.dart';
 import 'company_access.dart';
 import 'package:flutter/material.dart';
@@ -43,7 +44,9 @@ class CommercialDetail extends StatefulWidget {
     required this.document,
     required this.projects,
     required this.onChanged,
+    this.initialTab = 0,
   });
+  final int initialTab;
   final BackendClient api;
   final String companyId, currency;
   final Map<String, dynamic> document;
@@ -66,7 +69,7 @@ class _CommercialDetailState extends State<CommercialDetail> {
   bool busy = false, uncertain = false;
   String? error;
   RetriableCommand? pending;
-  int tab = 0;
+  late int tab = widget.initialTab;
   List<Map<String, dynamic>> related = [];
   Future<void> run(String action) =>
       execute(repository.action(doc['id'] as String, action));
@@ -95,7 +98,7 @@ class _CommercialDetailState extends State<CommercialDetail> {
         }
         doc = updated;
       });
-      if (tab > 0 && tab != 4) await showRelated(tab);
+      if (tab > 0 && tab != 4 && tab != 6) await showRelated(tab);
       await widget.onChanged();
     } on BackendException catch (e) {
       if (mounted) {
@@ -490,6 +493,12 @@ class _CommercialDetailState extends State<CommercialDetail> {
                         onPressed: busy ? null : () => showRelated(5),
                         child: const Text('Склад поступления'),
                       ),
+                    if (doc['kind'] == 'PURCHASE_GOODS' &&
+                        hasCompanyPermission(context, 'inventory.read'))
+                      TextButton(
+                        onPressed: busy ? null : () => setState(() => tab = 6),
+                        child: const Text('Товарные возвраты'),
+                      ),
                     TextButton(
                       onPressed: busy ? null : () => setState(() => tab = 4),
                       child: const Text('Вложения'),
@@ -498,7 +507,25 @@ class _CommercialDetailState extends State<CommercialDetail> {
                 ),
                 Expanded(
                   child: SingleChildScrollView(
-                    child: tab == 4
+                    child: tab == 6
+                        ? PurchaseReturns(
+                            key: ValueKey('${doc['id']}:${doc['version']}'),
+                            repository: repository,
+                            document: doc,
+                            currency: widget.currency,
+                            enabled: enabled,
+                            canWrite:
+                                hasCompanyPermission(
+                                  context,
+                                  'documents.post',
+                                ) &&
+                                hasCompanyPermission(
+                                  context,
+                                  'inventory.writeoff',
+                                ),
+                            execute: execute,
+                          )
+                        : tab == 4
                         ? DocumentFiles(
                             key: ValueKey(doc['id']),
                             repository: repository,
@@ -616,6 +643,10 @@ class _CommercialDetailState extends State<CommercialDetail> {
                                   Text(
                                     'Осталось: ${moneyText(doc['outstanding'] as num, widget.currency)}',
                                   ),
+                                  if ((doc['returned'] as num? ?? 0) > 0)
+                                    Text(
+                                      'Товарные возвраты: ${moneyText(doc['returned'] as num, widget.currency)}',
+                                    ),
                                   if ((doc['customerCredit'] as num) > 0)
                                     Text(
                                       'Аванс / переплата: ${moneyText(doc['customerCredit'] as num, widget.currency)}',

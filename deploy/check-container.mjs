@@ -87,7 +87,7 @@ try {
     assert.equal(response.status, expected, `${method} ${path}`);
     return response.json();
   }
-  assert.equal((await request("GET", "/health")).schemaVersion, 25);
+  assert.equal((await request("GET", "/health")).schemaVersion, 26);
   assert.equal((await fetch(origin + "/")).status, 200);
   assert.ok([403, 404].includes((await fetch(origin + "/.env")).status));
   await request(
@@ -314,6 +314,26 @@ try {
     ],
   });
   assert.equal((await request("GET", purchaseBase)).outstanding, 5);
+  const returnBatch = (
+    await request("GET", purchaseBase + "/returns")
+  ).batches.find((b) => b.unit_cost === 2);
+  let physicalReturn = await request("POST", purchaseBase + "/returns", {
+    documentVersion: (await request("GET", purchaseBase)).version,
+    businessDate: "2026-02-01",
+    reason: "SYNTHETIC CONTAINER RETURN",
+    lines: [{ batchId: returnBatch.batch_id, quantity: 1 }],
+  });
+  physicalReturn = await request(
+    "PUT",
+    purchaseBase + `/returns/${physicalReturn.item.id}`,
+    {
+      documentVersion: physicalReturn.document.version,
+      version: physicalReturn.item.version,
+      lines: [{ batchId: returnBatch.batch_id, quantity: 2 }],
+    },
+  );
+  assert.equal(physicalReturn.document.returned, 4);
+  assert.equal(physicalReturn.document.outstanding, 1);
   const form = new FormData();
   form.append(
     "file",
@@ -496,7 +516,23 @@ try {
       `SELECT d.kind || ':' || (d.data->>'total') || ':' || d.version::text || ':' || SUM(b.quantity)::text || ':' || SUM(b.quantity*b.unit_cost)::text FROM public.commercial_documents d JOIN public.commercial_stock_layers s ON s.document_id=d.id JOIN public.batches b ON b.id=s.batch_id WHERE d.id='${purchase.id}' GROUP BY d.id`,
     ])
   ).trim();
-  assert.equal(restoredPurchase, "PURCHASE_GOODS:12:3:5:12");
+  assert.equal(restoredPurchase, "PURCHASE_GOODS:12:5:3:8");
+  const restoredReturn = (
+    await compose([
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "muchet",
+      "-d",
+      "restored",
+      "-At",
+      "-c",
+      `SELECT (data->>'total') || ':' || status || ':' || (SELECT COUNT(*) FROM public.entity_history WHERE entity_id=r.id AND kind='purchase_return')::text FROM public.purchase_returns r WHERE id='${physicalReturn.item.id}'`,
+    ])
+  ).trim();
+  assert.equal(restoredReturn, "4:POSTED:1");
   const restoredDebt = (
     await compose([
       "exec",
@@ -640,7 +676,7 @@ try {
   ).token;
   assert.ok(token);
   console.log(
-    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected commercial refund and history, paid goods purchase and FIFO layers, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, stock balances and corrected counts, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
+    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected commercial refund and history, paid goods purchase, corrected physical supplier return and FIFO layers, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, stock balances and corrected counts, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
   );
 } catch (error) {
   try {

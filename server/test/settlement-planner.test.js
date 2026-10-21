@@ -102,3 +102,79 @@ test("chronological allocation preserves exact integers and does not mutate its 
   assert.equal(result.advance, 999999999901);
   assert.equal(result.outstanding, 0);
 });
+test("dated return reduces debt on its date and moves paid excess into supplier claim", () => {
+  const result = planSettlements({
+    recognized: true,
+    total: 100,
+    recognitionDate: "2026-10-20",
+    payments: [
+      payment("paid", 100, "21"),
+      payment("refund", 40, "24", "REFUND"),
+    ],
+    reductions: [{ id: "return", amount: 40, business_date: "2026-10-23" }],
+  });
+  assert.equal(result.allocations[0].debtAmount, 100);
+  assert.equal(result.adjustments[0].advanceAmount, 40);
+  assert.equal(result.allocations[1].advanceAmount, 40);
+  assert.equal(result.outstanding, 0);
+  assert.equal(result.advance, 0);
+  assert.equal(result.paid, 60);
+});
+test("return before payment splits the later cash and handles same-day recognition ordering", () => {
+  const result = planSettlements({
+    recognized: true,
+    total: 100,
+    recognitionDate: "2026-10-20",
+    payments: [payment("paid", 80, "22")],
+    reductions: [{ id: "r", amount: 40, business_date: "2026-10-22" }],
+  });
+  assert.equal(result.adjustments[0].debtAmount, 40);
+  assert.equal(result.allocations[0].debtAmount, 60);
+  assert.equal(result.advance, 20);
+});
+test("invalid credits cannot precede recognition, exceed the purchase or outlive cancellation", () => {
+  for (const [recognized, amount, date, code] of [
+    [true, 101, "23", "reductions_exceed_total"],
+    [true, 10, "19", "reduction_before_recognition"],
+    [false, 10, "23", "reduction_requires_recognition"],
+  ])
+    assert.throws(
+      () =>
+        planSettlements({
+          recognized,
+          total: 100,
+          recognitionDate: "2026-10-20",
+          payments: [],
+          reductions: [{ id: "r", amount, business_date: `2026-10-${date}` }],
+        }),
+      (e) => e.code === code,
+    );
+});
+test("dated returns preserve debt minus advance across prepayment, excess and split refunds", () => {
+  for (let total = 1; total <= 30; total++)
+    for (let returned = 1; returned <= total; returned++)
+      for (const before of [true, false])
+        for (const paid of [0, Math.floor(total / 2), total, total + 10]) {
+          for (const refunded of [0, Math.floor(paid / 2), paid]) {
+            const payments = [
+              ...(paid ? [payment("p", paid, before ? "19" : "24")] : []),
+              ...(refunded ? [payment("f", refunded, "25", "REFUND")] : []),
+            ];
+            const result = planSettlements({
+              recognized: true,
+              total,
+              recognitionDate: "2026-10-20",
+              payments,
+              reductions: [
+                { id: "r", amount: returned, business_date: "2026-10-23" },
+              ],
+            });
+            assert.equal(
+              result.outstanding - result.advance,
+              total - returned - paid + refunded,
+            );
+            assert.equal(result.outstanding * result.advance, 0);
+            assert.equal(result.paid, paid - refunded);
+          }
+        }
+});

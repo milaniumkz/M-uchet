@@ -36,7 +36,7 @@ export function registerInventoryReports(app, { db, auth, access, pageLimit }) {
         const type = request.query.type;
         if (
           type !== undefined &&
-          !["RECEIPT", "TRANSFER", "WRITEOFF"].includes(type)
+          !["RECEIPT", "TRANSFER", "WRITEOFF", "PURCHASE_RETURN"].includes(type)
         )
           fail(400, "invalid_stock_operation");
         const filters = `m.company_id=? AND m.data::jsonb->>'scope'=?

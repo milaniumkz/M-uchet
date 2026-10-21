@@ -39,6 +39,11 @@ export function registerSearchRoutes(app, { db, auth }) {
         [pattern, pattern],
       );
       await add(
+        ["documents.read", "inventory.read"],
+        `SELECT id,document_id AS "documentId",number AS title,'PURCHASE_RETURN' AS kind,business_date::text || ' · ' || reason AS detail FROM purchase_returns WHERE company_id=? AND (number ILIKE ? OR reason ILIKE ?) ORDER BY business_date DESC,id LIMIT ?`,
+        [pattern, pattern],
+      );
+      await add(
         ["orders.read", "catalog.read"],
         "SELECT id,COALESCE(data::jsonb->>'number',id) AS title,'GOODS' AS kind,COALESCE(data::jsonb->>'businessDate','') AS detail FROM orders WHERE company_id=? AND (data::jsonb->>'number' ILIKE ? OR data::jsonb->'counterparty'->>'name' ILIKE ? OR id=?) ORDER BY created_at DESC,id LIMIT ?",
         [pattern, pattern, q],
@@ -66,7 +71,7 @@ export function registerSearchRoutes(app, { db, auth }) {
       await add(
         ["inventory.read"],
         "SELECT id,data::jsonb->>'reason' AS title,'STOCK_COUNT' AS kind,business_date::text AS detail FROM stock_counts WHERE company_id=? AND (data::jsonb->>'reason' ILIKE ? OR id=?) ORDER BY business_date DESC,id LIMIT ?",
-        [pattern,q],
+        [pattern, q],
       );
       const all = groups.flat(),
         lower = q.toLocaleLowerCase("ru");

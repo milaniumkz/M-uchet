@@ -7,24 +7,39 @@ export function planSettlements({
   total,
   recognitionDate,
   payments,
+  reductions = [],
 }) {
   integer(total, "total", 1);
   businessDate(recognitionDate);
-  const sorted = payments
-    .map((payment) => {
+  if (!recognized && reductions.length)
+    fail(409, "reduction_requires_recognition");
+  let reduced = 0n;
+  const credits = reductions.map((reduction) => {
+    integer(reduction.amount, "reduction_amount", 1);
+    businessDate(reduction.business_date);
+    if (reduction.business_date < recognitionDate)
+      fail(409, "reduction_before_recognition");
+    reduced += BigInt(reduction.amount);
+    if (reduced > BigInt(total)) fail(409, "reductions_exceed_total");
+    return { ...reduction, event: "REDUCTION" };
+  });
+  const sorted = [
+    ...payments.map((payment) => {
       integer(payment.amount, "amount", 1);
       businessDate(payment.business_date);
       if (!["PAYMENT", "REFUND"].includes(payment.kind ?? "PAYMENT"))
         fail(400, "invalid_payment_kind");
-      return { ...payment, kind: payment.kind ?? "PAYMENT" };
-    })
-    .sort(
-      (a, b) =>
-        a.business_date.localeCompare(b.business_date) ||
-        Number(a.kind === "REFUND") - Number(b.kind === "REFUND") ||
-        String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) ||
-        String(a.id).localeCompare(String(b.id)),
-    );
+      return { ...payment, kind: payment.kind ?? "PAYMENT", event: "CASH" };
+    }),
+    ...credits,
+  ].sort(
+    (a, b) =>
+      a.business_date.localeCompare(b.business_date) ||
+      Number(a.event !== "REDUCTION") - Number(b.event !== "REDUCTION") ||
+      Number(a.kind === "REFUND") - Number(b.kind === "REFUND") ||
+      String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) ||
+      String(a.id).localeCompare(String(b.id)),
+  );
   let claim = 0n,
     advance = 0n,
     paid = 0n,
@@ -38,10 +53,25 @@ export function planSettlements({
     claim -= applied;
     advance -= applied;
   };
-  const allocations = sorted.map((payment) => {
+  const adjustments = [],
+    allocations = [];
+  for (const payment of sorted) {
     if (payment.business_date >= recognitionDate) recognize();
     const amount = BigInt(payment.amount);
     let debtAmount, advanceAmount;
+    if (payment.event === "REDUCTION") {
+      debtAmount = claim < amount ? claim : amount;
+      advanceAmount = amount - debtAmount;
+      claim -= debtAmount;
+      advance += advanceAmount;
+      const { event, ...reduction } = payment;
+      adjustments.push({
+        reduction,
+        debtAmount: Number(debtAmount),
+        advanceAmount: Number(advanceAmount),
+      });
+      continue;
+    }
     if (payment.kind === "REFUND") {
       if (amount > paid) fail(409, "refund_exceeds_paid_on_date");
       advanceAmount = advance < amount ? advance : amount;
@@ -56,12 +86,13 @@ export function planSettlements({
       advance += advanceAmount;
       paid += amount;
     }
-    return {
-      payment,
+    const { event, ...cash } = payment;
+    allocations.push({
+      payment: cash,
       debtAmount: Number(debtAmount),
       advanceAmount: Number(advanceAmount),
-    };
-  });
+    });
+  }
   recognize();
   if (
     [claim, advance, paid].some(
@@ -71,6 +102,8 @@ export function planSettlements({
     fail(422, "settlement_amount_out_of_range");
   return {
     allocations,
+    adjustments,
+    reduced: Number(reduced),
     applied: Number(applied),
     paid: Number(paid),
     outstanding: Number(claim),

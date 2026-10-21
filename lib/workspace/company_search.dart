@@ -9,6 +9,7 @@ const searchKindLabels = {
   'SALE_INVOICE': 'Счёт на оплату',
   'SALE_ACT': 'Акт реализации',
   'PURCHASE_ACT': 'Поступление услуг',
+  'PURCHASE_RETURN': 'Возврат поставщику',
   'PURCHASE_GOODS': 'Поступление товаров',
   'GOODS': 'Товарная продажа',
   'clients': 'Клиент',

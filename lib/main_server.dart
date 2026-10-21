@@ -994,7 +994,9 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     if (result == null || !mounted || company?.id != selectedCompany.id) {
       return;
     }
-    final id = result['id'] as String, kind = result['kind'] as String;
+    final isReturn = result['kind'] == 'PURCHASE_RETURN';
+    final id = (isReturn ? result['documentId'] : result['id']) as String,
+        kind = isReturn ? 'PURCHASE_GOODS' : result['kind'] as String;
     final base = ['v1', 'companies', selectedCompany.id];
     if (kind == 'PROJECT') {
       await perform(() async {
@@ -1072,6 +1074,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
           companyId: selectedCompany.id,
           currency: selectedCompany.currency,
           document: entity!,
+          initialTab: isReturn ? 6 : 0,
           projects: projects,
           onChanged: refresh,
         ),

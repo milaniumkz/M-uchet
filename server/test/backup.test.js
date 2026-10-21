@@ -100,6 +100,10 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const postedPurchase=await request('POST',prefix+`/commercial-documents/${purchase.id}/post`,{},session.token,key());
  await request('PUT',prefix+`/commercial-documents/${purchase.id}`,{version:postedPurchase.version,items:[{productId:purchaseProduct.id,warehouseId:warehouse.id,quantity:'5',unitPrice:2}]},session.token,key());
  await request('POST',prefix+'/inventory/writeoffs',{productId:purchaseProduct.id,warehouseId:warehouse.id,quantity:1,reason:'SYNTHETIC PURCHASE CONSUMPTION',businessDate:'2026-01-31'},session.token,key());
+ const purchaseBeforeReturn=await request('GET',prefix+`/commercial-documents/${purchase.id}`,undefined,session.token);
+ const returnBatch=(await request('GET',prefix+`/commercial-documents/${purchase.id}/returns`,undefined,session.token)).batches.find(b=>b.unit_cost===2&&b.quantity>=2);
+ let purchaseReturn=await request('POST',prefix+`/commercial-documents/${purchase.id}/returns`,{documentVersion:purchaseBeforeReturn.version,businessDate:'2026-02-01',reason:'SYNTHETIC RESTORED RETURN',lines:[{batchId:returnBatch.batch_id,quantity:1}]},session.token,key());
+ purchaseReturn=await request('PUT',prefix+`/commercial-documents/${purchase.id}/returns/${purchaseReturn.item.id}`,{documentVersion:purchaseReturn.document.version,version:purchaseReturn.item.version,lines:[{batchId:returnBatch.batch_id,quantity:2}]},session.token,key());
  await app.close();app=undefined;
  const dump=await open(join(directory,'backup.dump'),'wx',0o600);
  try{await docker(['pg_dump','-U','muchet','-d','muchet',`--schema=${schema}`,'--format=custom','--no-owner','--no-acl'],'ignore',dump.fd);}finally{await dump.close();}
@@ -132,11 +136,13 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const refundCopy=(await restored.inject({url:prefix+`/commercial-documents/${refundDoc.id}`,headers})).json();assert.equal(refundCopy.paid,7500);assert.equal(refundCopy.outstanding,2500);
  const refundHistory=(await restored.inject({url:prefix+`/commercial-documents/${refundDoc.id}/payments/${refund.id}/history`,headers})).json();assert.equal(refundHistory.payment.kind,'REFUND');assert.equal(refundHistory.payment.version,4);assert.equal(refundHistory.items.length,3);assert.equal(refundHistory.payment.business_date,'2026-10-23');
  assert.equal(wallets.find(w=>w.id===refundWallet.id).balance,7500);
- const purchaseCopy=(await restored.inject({url:prefix+`/commercial-documents/${purchase.id}`,headers})).json();assert.equal(purchaseCopy.kind,'PURCHASE_GOODS');assert.equal(purchaseCopy.version,3);assert.equal(purchaseCopy.data.total,12);assert.equal(purchaseCopy.paid,7);assert.equal(purchaseCopy.outstanding,5);
- const purchaseLayers=(await restored.inject({url:prefix+`/commercial-documents/${purchase.id}/stock`,headers})).json().items;assert.equal(purchaseLayers.reduce((n,b)=>n+b.quantity,0),4);assert.equal(purchaseLayers.reduce((n,b)=>n+b.quantity*b.unit_cost,0),10);assert.equal(purchaseLayers.reduce((n,b)=>n+b.original_quantity,0),5);
+ const purchaseCopy=(await restored.inject({url:prefix+`/commercial-documents/${purchase.id}`,headers})).json();assert.equal(purchaseCopy.kind,'PURCHASE_GOODS');assert.equal(purchaseCopy.version,5);assert.equal(purchaseCopy.data.total,12);assert.equal(purchaseCopy.paid,7);assert.equal(purchaseCopy.outstanding,1);assert.equal(purchaseCopy.returned,4);
+ const purchaseLayers=(await restored.inject({url:prefix+`/commercial-documents/${purchase.id}/stock`,headers})).json().items;assert.equal(purchaseLayers.reduce((n,b)=>n+b.quantity,0),2);assert.equal(purchaseLayers.reduce((n,b)=>n+b.quantity*b.unit_cost,0),6);assert.equal(purchaseLayers.reduce((n,b)=>n+b.original_quantity,0),5);
+ const restoredReturns=(await restored.inject({url:prefix+`/commercial-documents/${purchase.id}/returns`,headers})).json();assert.equal(restoredReturns.items.length,1);assert.equal(restoredReturns.items[0].data.total,4);assert.equal(restoredReturns.items[0].reason,'SYNTHETIC RESTORED RETURN');
+ const restoredReturnHistory=(await restored.inject({url:prefix+`/commercial-documents/${purchase.id}/returns/${purchaseReturn.item.id}/history`,headers})).json();assert.ok(restoredReturnHistory.items.length>=1);
  assert.equal(wallets.find(w=>w.id===purchaseWallet.id).balance,0);
  const countCopy=(await restored.inject({url:prefix+`/inventory/counts/${stockCount.id}`,headers})).json();assert.equal(countCopy.status,'POSTED');assert.equal(countCopy.version,3);assert.equal(countCopy.data.lines[0].effect.cost,110);
- const stockCopy=(await restored.inject({url:prefix+'/inventory/balances',headers})).json();assert.equal(stockCopy.summary.value,65);assert.equal(stockCopy.items.find(i=>i.product_id===product.id).quantity,1);
+ const stockCopy=(await restored.inject({url:prefix+'/inventory/balances',headers})).json();assert.equal(stockCopy.summary.value,61);assert.equal(stockCopy.items.find(i=>i.product_id===product.id).quantity,1);
  const countHistory=(await restored.inject({url:prefix+`/inventory/counts/${stockCount.id}/history`,headers})).json();assert.equal(countHistory.items.length,2);
  const shifts=(await restored.inject({url:prefix+'/shifts',headers})).json().items;assert.equal(shifts.find(s=>s.id===shift.id).difference,-1);
  const invitations=(await restored.inject({url:prefix+'/invitations',headers})).json().items;assert.ok(invitations.some(i=>i.id===invitation.id));

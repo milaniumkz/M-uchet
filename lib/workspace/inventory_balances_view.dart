@@ -211,7 +211,7 @@ class _InventoryBalancesViewState extends State<InventoryBalancesView> {
       child: ListTile(
         isThreeLine: true,
         title: Text(
-          '${const {'RECEIPT': 'Поступление', 'TRANSFER': 'Перемещение', 'WRITEOFF': 'Списание'}[row['kind']]} · ${row['product_name'] ?? d['productId']}',
+          '${const {'RECEIPT': 'Поступление', 'TRANSFER': 'Перемещение', 'WRITEOFF': 'Списание', 'PURCHASE_RETURN': 'Возврат поставщику'}[row['kind']]} · ${row['product_name'] ?? d['productId']}',
         ),
         subtitle: Text(
           '${d['businessDate'] ?? (row['created_at'] as String).substring(0, 10)} · ${d['quantity']} ед.\n${d['reason'] ?? 'Стоимость: ${moneyText(d['cost'] as num, widget.currency)}'}',
@@ -324,6 +324,7 @@ class _InventoryBalancesViewState extends State<InventoryBalancesView> {
                               'RECEIPT': 'Поступления',
                               'TRANSFER': 'Перемещения',
                               'WRITEOFF': 'Списания',
+                              'PURCHASE_RETURN': 'Возвраты поставщикам',
                             }
                           : const {
                               'ALL': 'Все остатки',

@@ -14,6 +14,7 @@ const available = [
   "test_live/commercial_workspace_test.dart",
   "test_live/refund_workspace_test.dart",
   "test_live/purchase_workspace_test.dart",
+  "test_live/purchase_returns_test.dart",
   "test_live/bank_workspace_test.dart",
   "test_live/ledger_workspace_test.dart",
   "test_live/inventory_workspace_test.dart",
