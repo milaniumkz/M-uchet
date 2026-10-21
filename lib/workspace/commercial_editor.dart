@@ -34,21 +34,27 @@ class _ServiceInput {
     this.unit = 'услуга',
     this.quantity = '1',
     this.price = '0.00',
+    this.productId,
+    this.warehouseId,
   });
-  final key = UniqueKey();
+  Key key = UniqueKey();
   String description, unit, quantity, price;
-  Map<String, dynamic> toJson() => {
+  String? productId, warehouseId;
+  Map<String, dynamic> toJson({bool goods = false}) => {
     'description': description.trim(),
     'unit': unit.trim(),
     'quantity': quantity.trim().replaceAll(',', '.'),
     'unitPrice': parseMoney(price),
+    if (goods) 'productId': productId,
+    if (goods) 'warehouseId': warehouseId,
   };
 }
 
 class _CommercialEditorState extends State<CommercialEditor> {
   late final repository = CommercialRepository(widget.api, widget.companyId);
   final lines = <_ServiceInput>[];
-  List<ResourceDto> parties = [], services = [];
+  List<ResourceDto> parties = [], services = [], products = [], warehouses = [];
+  bool get goods => kind == 'PURCHASE_GOODS';
   Map<String, dynamic>? preview;
   String? counterpartyId, projectId, error;
   late String kind, date, scope;
@@ -84,6 +90,8 @@ class _CommercialEditorState extends State<CommercialEditor> {
         final l = jsonObject(raw);
         lines.add(
           _ServiceInput(
+            productId: l['productId'] as String?,
+            warehouseId: l['warehouseId'] as String?,
             description: l['description'] as String,
             unit: l['unit'] as String,
             quantity: l['quantity'] as String,
@@ -105,6 +113,8 @@ class _CommercialEditorState extends State<CommercialEditor> {
           widget.direction == 'purchases' ? 'suppliers' : 'clients',
         ),
         catalog.listAll('services'),
+        if (widget.direction == 'purchases') catalog.listAll('nomenklatura'),
+        if (widget.direction == 'purchases') catalog.listAll('warehouses'),
       ]);
       if (!mounted) {
         return;
@@ -112,6 +122,10 @@ class _CommercialEditorState extends State<CommercialEditor> {
       setState(() {
         parties = results[0];
         services = results[1];
+        if (results.length > 2) {
+          products = results[2];
+          warehouses = results[3];
+        }
         loading = false;
       });
     } on BackendException catch (e) {
@@ -128,6 +142,10 @@ class _CommercialEditorState extends State<CommercialEditor> {
     if (counterpartyId == null) {
       throw const FormatException('Выберите контрагента.');
     }
+    if (goods &&
+        lines.any((l) => l.productId == null || l.warehouseId == null)) {
+      throw const FormatException('Выберите товар и склад для каждой позиции.');
+    }
     return {
       'kind': kind,
       'counterpartyId': counterpartyId,
@@ -139,7 +157,7 @@ class _CommercialEditorState extends State<CommercialEditor> {
       'vatTreatment': vatTreatment,
       'note': note,
       'externalNumber': externalNumber,
-      'items': lines.map((l) => l.toJson()).toList(),
+      'items': lines.map((l) => l.toJson(goods: goods)).toList(),
       if (widget.document != null) 'version': widget.document!['version'],
       if (widget.document != null) 'documentId': widget.document!['id'],
       if (refreshDetails) 'refreshIssuer': true,
@@ -267,8 +285,72 @@ class _CommercialEditorState extends State<CommercialEditor> {
           ],
         ),
         const SizedBox(height: 12),
+        if (goods) ...[
+          DropdownButtonFormField<String>(
+            initialValue: line.productId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Товар'),
+            items: [
+              ...products.map(
+                (p) => DropdownMenuItem(
+                  value: p.id,
+                  child: Text(
+                    p.data['name'] as String? ?? p.id,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              if (line.productId != null &&
+                  !products.any((p) => p.id == line.productId))
+                DropdownMenuItem(
+                  value: line.productId,
+                  child: Text(line.description),
+                ),
+            ],
+            onChanged: busy || uncertain
+                ? null
+                : (v) => setState(() {
+                    line.productId = v;
+                    line.key = UniqueKey();
+                    final p = products.firstWhere((p) => p.id == v);
+                    line.description = p.data['name'] as String? ?? '';
+                    line.unit = p.data['unit'] as String? ?? 'ед.';
+                    preview = null;
+                  }),
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<String>(
+            initialValue: line.warehouseId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Склад'),
+            items: [
+              ...warehouses.map(
+                (w) => DropdownMenuItem(
+                  value: w.id,
+                  child: Text(
+                    w.data['name'] as String? ?? w.id,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              if (line.warehouseId != null &&
+                  !warehouses.any((w) => w.id == line.warehouseId))
+                DropdownMenuItem(
+                  value: line.warehouseId,
+                  child: const Text('Склад документа'),
+                ),
+            ],
+            onChanged: busy || uncertain
+                ? null
+                : (v) => setState(() {
+                    line.warehouseId = v;
+                    preview = null;
+                  }),
+          ),
+          const SizedBox(height: 14),
+        ],
         field(
-          'Наименование услуги',
+          goods ? 'Описание позиции' : 'Наименование услуги',
           line.description,
           (v) => line.description = v,
         ),
@@ -355,23 +437,33 @@ class _CommercialEditorState extends State<CommercialEditor> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (widget.document == null &&
-                            widget.direction == 'sales')
+                        if (widget.document == null)
                           DropdownButtonFormField<String>(
                             initialValue: kind,
                             decoration: const InputDecoration(
                               labelText: 'Тип документа',
                             ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'SALE_INVOICE',
-                                child: Text('Счёт на оплату'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'SALE_ACT',
-                                child: Text('Акт оказанных услуг'),
-                              ),
-                            ],
+                            items: widget.direction == 'purchases'
+                                ? const [
+                                    DropdownMenuItem(
+                                      value: 'PURCHASE_ACT',
+                                      child: Text('Поступление услуг'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'PURCHASE_GOODS',
+                                      child: Text('Поступление товаров'),
+                                    ),
+                                  ]
+                                : const [
+                                    DropdownMenuItem(
+                                      value: 'SALE_INVOICE',
+                                      child: Text('Счёт на оплату'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'SALE_ACT',
+                                      child: Text('Акт оказанных услуг'),
+                                    ),
+                                  ],
                             onChanged: enabled
                                 ? (v) => setState(() => kind = v!)
                                 : null,
@@ -506,8 +598,10 @@ class _CommercialEditorState extends State<CommercialEditor> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'В этом документе — услуги. Складские остатки не изменяются.',
+                        Text(
+                          goods
+                              ? 'Товар поступит на выбранный склад после проведения. Оплата и денежный возврат учитываются отдельно.'
+                              : 'В этом документе — услуги. Складские остатки не изменяются.',
                         ),
                         const SizedBox(height: 16),
                         ...lines.asMap().entries.map(
@@ -526,7 +620,7 @@ class _CommercialEditorState extends State<CommercialEditor> {
                               icon: const Icon(Icons.add),
                               label: const Text('Добавить позицию'),
                             ),
-                            if (services.isNotEmpty)
+                            if (!goods && services.isNotEmpty)
                               PopupMenuButton<ResourceDto>(
                                 tooltip: 'Выбрать услугу из справочника',
                                 enabled: enabled,

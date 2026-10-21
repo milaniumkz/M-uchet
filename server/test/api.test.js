@@ -334,7 +334,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 24);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 25);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -679,6 +679,117 @@ test('moving act after its payment date reclassifies payment as an advance until
  const row=await f.app.db.prepare("SELECT SUM(l.debit-l.credit) AS balance FROM journal_lines l JOIN journal j ON j.id=l.entry_id WHERE j.company_id=? AND j.business_date<=? AND l.account='customer_advances'").get(f.company.id,'2026-10-21');
  assert.equal(row.balance,-10000);
  assert.equal((await f.api('GET','/wallets')).body.items[0].balance,10000);
+});
+test('goods purchase posts exact rounded VAT into FIFO stock and supplier debt without an expense',async t=>{
+ const f=await commercialFixture(t),catalog=await f.catalog();
+ let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_GOODS',counterpartyId:f.supplier.id,vatBasisPoints:1600,items:[{productId:catalog.productId,warehouseId:catalog.warehouseId,quantity:'3',unitPrice:1}]}));assert.equal(doc.status,200);doc=doc.body;
+ assert.equal(doc.data.total,3);assert.equal((await f.api('GET','/inventory')).body.items.length,0);
+ let posted=await f.api('POST',`/commercial-documents/${doc.id}/post`,{});assert.equal(posted.status,200);assert.equal(posted.body.outstanding,3);
+ let balances=(await f.api('GET','/inventory/balances')).body;assert.equal(balances.items[0].quantity,3);assert.equal(balances.summary.value,3);
+ let edited=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:posted.body.version,items:[{productId:catalog.productId,warehouseId:catalog.warehouseId,quantity:'3',unitPrice:2}]});assert.equal(edited.status,200);assert.equal(edited.body.data.vat,1);assert.equal(edited.body.data.total,7);
+ balances=(await f.api('GET','/inventory/balances')).body;assert.equal(balances.summary.value,7);assert.equal(balances.items[0].quantity,3);
+ const layers=(await f.api('GET','/inventory')).body.items.filter(b=>b.quantity>0);assert.deepEqual(layers.map(b=>[b.quantity,b.unit_cost]).sort((a,b)=>a[1]-b[1]),[[2,2],[1,3]]);
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.expenses,0);
+ const statement=(await f.api('GET',`/counterparties/suppliers/${f.supplier.id}/statement`)).body;assert.equal(statement.accounts.find(a=>a.account==='payables').closing,-7);
+ const sale=(await f.api('POST','/orders',{items:[{...catalog,quantity:2,unitPrice:10}]})).body;await f.api('POST',`/orders/${sale.id}/reserve`,{});assert.equal((await f.api('POST',`/orders/${sale.id}/ship`,{})).status,200);
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.cogs,4);assert.equal((await f.api('GET','/inventory/balances')).body.summary.value,3);
+ const rename=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:edited.body.version,note:'Historical metadata edit',businessDate:'2025-01-01',vatBasisPoints:0,items:[{productId:catalog.productId,warehouseId:catalog.warehouseId,quantity:'3',unitPrice:4}]});assert.equal(rename.status,409);assert.equal(rename.body.error,'purchase_stock_consumed');
+ const unchanged=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:edited.body.version,note:'Metadata after consumption'});assert.equal(unchanged.status,200);
+ assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/cancel`,{})).body.error,'purchase_stock_consumed');
+ assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.status,'POSTED');
+});
+test('paid goods purchase supports correction, cash refund and cancellation without a duplicate receipt',async t=>{
+ const f=await commercialFixture(t),catalog=await f.catalog();await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:20000,description:'Funding'});
+ let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_GOODS',counterpartyId:f.supplier.id,items:[{...catalog,quantity:'10',unitPrice:1000}]})).body;
+ doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'})).status,200);
+ let changed=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,items:[{...catalog,quantity:'5',unitPrice:1000}]});assert.equal(changed.status,200);assert.equal(changed.body.customerCredit,5000);
+ const key=randomUUID(),body={kind:'REFUND',walletId:f.wallet.id,amount:5000,businessDate:'2026-10-22'};const refund=await f.api('POST',`/commercial-documents/${doc.id}/payments`,body,key);assert.equal(refund.status,200);assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/payments`,body,key)).body.id,refund.body.id);
+ assert.equal((await f.api('GET','/inventory/balances')).body.items[0].quantity,5);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,15000);
+ assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/cancel`,{})).status,200);assert.equal((await f.api('GET','/inventory/balances')).body.items[0].quantity,0);
+ assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).status,200);assert.equal((await f.api('GET','/inventory/balances')).body.items[0].quantity,5);
+ assert.equal((await f.api('GET','/commercial-documents?direction=purchases&kind=PURCHASE_GOODS')).body.summary.count,1);
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.expenses,0);
+});
+test('multi-line purchase corrections roll back all stock and history when one consumed line cannot be removed',async t=>{
+ const f=await commercialFixture(t),r=await f.catalog(),second=(await f.api('POST','/resources/nomenklatura',{data:{name:'SYNTHETIC SECOND PURCHASE PRODUCT'}})).body;
+ const items=[{...r,quantity:'5',unitPrice:100},{productId:second.id,warehouseId:r.warehouseId,quantity:'5',unitPrice:200}];
+ let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_GOODS',counterpartyId:f.supplier.id,items})).body;doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ const sale=(await f.api('POST','/orders',{items:[{productId:second.id,warehouseId:r.warehouseId,quantity:2,unitPrice:300}]})).body;await f.api('POST',`/orders/${sale.id}/reserve`,{});await f.api('POST',`/orders/${sale.id}/ship`,{});
+ const old=(await f.api('GET',`/commercial-documents/${doc.id}/stock`)).body.items;
+ const failed=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,items:[{...items[0],quantity:'7'},{...items[1],quantity:'1'}]});assert.equal(failed.status,409);assert.equal(failed.body.error,'purchase_stock_consumed');
+ const after=(await f.api('GET',`/commercial-documents/${doc.id}/stock`)).body.items;assert.deepEqual(after,old);assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.version,doc.version);
+ const reorder=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,items:[...items].reverse(),businessDate:'2026-01-01'});assert.equal(reorder.status,200);
+ assert.deepEqual((await f.api('GET',`/commercial-documents/${doc.id}/stock`)).body.items,old);
+ const increase=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:reorder.body.version,items:[items[0],{...items[1],quantity:'7'}]});assert.equal(increase.status,200);
+ const stock=(await f.api('GET',`/commercial-documents/${doc.id}/stock`)).body.items.find(b=>b.product_id===second.id);assert.equal(stock.quantity,5);assert.equal(stock.original_quantity,7);
+ const statement=(await f.api('GET',`/counterparties/suppliers/${f.supplier.id}/statement`)).body;assert.ok(statement.items.some(m=>m.source_kind==='PURCHASE' && m.source_id===doc.id));
+ const movements=(await f.api('GET','/inventory/operations')).body.items.filter(m=>m.data.documentId===doc.id);assert.equal(movements.length,2);assert.ok(movements.every(m=>m.data.documentNumber===doc.number));
+});
+test('purchase correction sequence always reconciles physical value with the inventory ledger after shipping and writeoff',async t=>{
+ const f=await commercialFixture(t,{vat:true}),r=await f.catalog();
+ let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_GOODS',counterpartyId:f.supplier.id,items:[{...r,quantity:'8',unitPrice:10}]})).body;doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ const sold=(await f.api('POST','/orders',{vatBasisPoints:1600,items:[{...r,quantity:3,unitPrice:50}]})).body;await f.api('POST',`/orders/${sold.id}/reserve`,{});await f.api('POST',`/orders/${sold.id}/ship`,{});
+ await f.api('POST','/inventory/writeoffs',{...r,quantity:1,reason:'SYNTHETIC CONSUMED PURCHASE'});
+ const held=(await f.api('POST','/orders',{vatBasisPoints:1600,items:[{...r,quantity:1,unitPrice:50}]})).body;await f.api('POST',`/orders/${held.id}/reserve`,{});
+ let accepted=0,rejected=0;
+ for(let step=0;step<20;step++){
+  const quantity=[5,8,3,7,9][step%5],unitPrice=[10,9,11,8,10][step%5],vatBasisPoints=step%3===0?1600:0,vatTreatment=vatBasisPoints && step%2===0?'PENDING':'IN_COST';
+  const result=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,vatBasisPoints,vatTreatment,items:[{...r,quantity:String(quantity),unitPrice}]});
+  if(result.status===200){accepted++;doc=result.body;}else{rejected++;assert.equal(result.status,409);assert.equal(result.body.error,'purchase_stock_consumed');}
+  const stock=(await f.api('GET','/inventory/balances')).body,trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;
+  assert.equal(trial.find(a=>a.account==='inventory').balance,stock.summary.value);
+  assert.equal(trial.find(a=>a.account==='cogs').balance,30);assert.equal(trial.find(a=>a.account==='inventory_loss').balance,10);
+  assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.version,doc.version);
+  assert.equal((await f.api('GET',`/commercial-documents/${doc.id}/stock`)).body.items.reduce((n,b)=>n+b.reserved,0),1);
+ }
+ assert.ok(accepted>0);assert.ok(rejected>0);
+});
+test('purchase repricing keeps a live reservation and shipment cost, while a pool change requires releasing it',async t=>{
+ const f=await commercialFixture(t),r=await f.catalog();const items=[{...r,quantity:'5',unitPrice:100}];
+ let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_GOODS',counterpartyId:f.supplier.id,items})).body;doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ const order=(await f.api('POST','/orders',{items:[{...r,quantity:2,unitPrice:500}]})).body;await f.api('POST',`/orders/${order.id}/reserve`,{});
+ const repriced=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,items:[{...items[0],unitPrice:200}]});assert.equal(repriced.status,200);
+ const layers=(await f.api('GET',`/commercial-documents/${doc.id}/stock`)).body.items;assert.equal(layers[0].reserved,2);assert.equal(layers[0].unit_cost,200);
+ const moved=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:repriced.body.version,scope:'MANAGEMENT'});assert.equal(moved.status,409);assert.equal(moved.body.error,'purchase_stock_consumed');
+ assert.equal((await f.api('POST',`/orders/${order.id}/ship`,{})).status,200);
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.cogs,400);assert.equal((await f.api('GET','/inventory/balances')).body.summary.value,600);
+});
+test('supplier prepayment on a draft goods purchase creates an advance without stock, including bank import',async t=>{
+ const f=await commercialFixture(t),r=await f.catalog();await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:10000,description:'Funding'});
+ const doc=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_GOODS',counterpartyId:f.supplier.id,businessDate:'2026-10-25',items:[{...r,quantity:'2',unitPrice:100}]})).body;
+ const paid=await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:80,businessDate:'2026-10-20'});assert.equal(paid.status,200);assert.equal(paid.body.document.status,'DRAFT');assert.equal((await f.api('GET','/inventory')).body.items.length,0);
+ const statement=(await f.api('POST','/bank-imports',{walletId:f.wallet.id,csv:'date;reference;debit;credit;description\n2026-10-21;goods-advance;0.70;0;SYNTHETIC SUPPLIER ADVANCE'})).body;
+ const row=(await f.api('GET',`/bank-imports/${statement.id}`)).body.items[0],path=`/bank-imports/${statement.id}/rows/${row.id}`;
+ assert.equal((await f.api('PUT',path,{version:1,classification:'DOCUMENT',documentId:doc.id})).status,200);assert.equal((await f.api('POST',path+'/post',{version:2})).status,200);
+ assert.equal((await f.api('GET','/inventory')).body.items.length,0);
+ assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).status,200);
+ const balances=(await f.api('GET','/inventory/balances')).body;assert.equal(balances.summary.value,200);assert.equal(balances.items[0].quantity,2);
+ const before=await f.app.db.prepare("SELECT SUM(l.debit-l.credit) AS balance FROM journal j JOIN journal_lines l ON l.entry_id=j.id WHERE j.company_id=? AND j.business_date<'2026-10-25' AND l.account='supplier_advances'").get(f.company.id);assert.equal(before.balance,150);
+ const trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;assert.equal(trial.find(a=>a.account==='supplier_advances').balance,0);assert.equal(trial.find(a=>a.account==='payables').balance,-50);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,9850);
+});
+test('goods input VAT pending verification stays outside stock and no expense is recognized on purchase',async t=>{
+ const f=await commercialFixture(t,{vat:true}),r=await f.catalog();let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_GOODS',counterpartyId:f.supplier.id,vatBasisPoints:1600,vatTreatment:'PENDING',items:[{...r,quantity:'3',unitPrice:2}]})).body;
+ doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;assert.equal(doc.data.total,7);
+ assert.equal((await f.api('GET','/inventory/balances')).body.summary.value,6);
+ const trial=(await f.api('GET','/accounting/trial-balance')).body.accounts;assert.equal(trial.find(a=>a.account==='pending_input_vat').balance,1);assert.equal(trial.find(a=>a.account==='payables').balance,-7);
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.expenses,0);
+ const source=(await f.api('GET',`/commercial-documents/${doc.id}/movements`)).body.items.find(p=>p.active);
+ assert.equal((await f.api('PUT',`/accounting/journal/${source.id}`,{lines:[{account:'cash',debit:1},{account:'capital',credit:1}]})).body.error,'source_document_edit_required');
+ const printed=await f.app.inject({url:f.prefix+`/commercial-documents/${doc.id}/print`,headers:{authorization:`Bearer ${f.owner.token}`}});assert.equal(printed.statusCode,200);assert.match(printed.body,/Товар \/ склад/);assert.match(printed.body,/Покупатель \/ фирма/);assert.match(printed.body,/Поставщик/);
+});
+test('goods receipt enforces inventory permission, company references and atomic validation of all lines',async t=>{
+ const f=await commercialFixture(t),catalog=await f.catalog(),reader=await f.user('synthetic-purchase-writer@example.test');
+ await f.api('PUT',`/members/${reader.id}`,{permissions:['documents.write','documents.post']});
+ const body={...f.body,kind:'PURCHASE_GOODS',counterpartyId:f.supplier.id,items:[{...catalog,quantity:'2',unitPrice:1000}]};
+ const doc=(await f.api('POST','/commercial-documents',body)).body;
+ const posted=await f.call('POST',f.prefix+`/commercial-documents/${doc.id}/post`,{},reader.token,{'idempotency-key':randomUUID()});assert.equal(posted.status,403);assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.status,'DRAFT');assert.equal((await f.api('GET','/inventory')).body.items.length,0);
+ for(const quantity of ['0','1.5','2.000','-1',2])assert.equal((await f.api('POST','/commercial-documents',{...body,items:[{...body.items[0],quantity}]})).body.error,'invalid_goods_quantity');
+ for(const description of [7,{},[]])assert.equal((await f.api('POST','/commercial-documents',{...body,items:[{...body.items[0],description}]})).status,400);
+ assert.equal((await f.api('POST','/commercial-documents',{...body,items:[body.items[0],body.items[0]]})).body.error,'duplicate_purchase_position');
+ assert.equal((await f.api('POST','/commercial-documents',{...body,items:[body.items[0],{...body.items[0],productId:'foreign'}]})).status,404);
+ assert.equal((await f.api('GET','/inventory')).body.items.length,0);
 });
 test('client and supplier refunds preserve dated cash, reopen debt and support audited corrections',async t=>{
  for(const purchase of [false,true]){

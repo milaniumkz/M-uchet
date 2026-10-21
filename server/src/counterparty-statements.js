@@ -62,7 +62,7 @@ export function registerCounterpartyStatements(
             fail(400, "invalid_cursor");
           }
         }
-        const cte = `WITH docs AS(SELECT * FROM commercial_documents WHERE company_id=? AND data->>'counterpartyId'=? AND ${kind === "clients" ? "kind IN ('SALE_INVOICE','SALE_ACT')" : "kind='PURCHASE_ACT'"}),
+        const cte = `WITH docs AS(SELECT * FROM commercial_documents WHERE company_id=? AND data->>'counterpartyId'=? AND ${kind === "clients" ? "kind IN ('SALE_INVOICE','SALE_ACT')" : "kind IN ('PURCHASE_ACT','PURCHASE_GOODS')"}),
    goods AS(SELECT id,company_id FROM orders WHERE company_id=? AND data::jsonb->>'counterpartyId'=? AND ?='clients'),
    opening_debts AS(SELECT id,company_id FROM debts WHERE company_id=? AND counterparty_id=? AND type=?),
    assets AS(SELECT id,company_id FROM fixed_assets WHERE company_id=? AND supplier_id=? AND ?='suppliers'),
@@ -77,7 +77,7 @@ export function registerCounterpartyStatements(
     UNION SELECT p.journal_id,g.id FROM order_settlement_postings p JOIN goods g ON g.id=p.order_id AND g.company_id=p.company_id
     UNION SELECT e.journal_id,g.id FROM payments p JOIN goods g ON g.id=p.order_id AND g.company_id=p.company_id JOIN wallet_entries e ON e.company_id=p.company_id AND e.reference_id=p.id
    ),sources AS(
-    SELECT journal_id,source_id,'SERVICE' AS source_kind FROM service_sources
+    SELECT s.journal_id,s.source_id,CASE WHEN d.kind='PURCHASE_GOODS' THEN 'PURCHASE' ELSE 'SERVICE' END AS source_kind FROM service_sources s JOIN docs d ON d.id=s.source_id
     UNION SELECT journal_id,source_id,'GOODS' FROM goods_sources
     UNION SELECT p.journal_id,d.id,'DEBT' FROM debt_postings p JOIN opening_debts d ON d.id=p.debt_id AND d.company_id=p.company_id
     UNION SELECT p.journal_id,a.id,'ASSET' FROM asset_postings p JOIN assets a ON a.id=p.asset_id AND a.company_id=p.company_id
@@ -152,7 +152,7 @@ export function registerCounterpartyStatements(
           to,
           accounts,
           items: rows,
-          includedSources: ["SERVICE", "GOODS", "DEBT", "ASSET"],
+          includedSources: ["SERVICE", "PURCHASE", "GOODS", "DEBT", "ASSET"],
           snapshotAt: new Date().toISOString(),
           coverage: "LINKED_JOURNAL_ONLY",
           nextCursor:

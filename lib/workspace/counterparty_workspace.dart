@@ -165,7 +165,7 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
   Future<void> openMovement(Map<String, dynamic> movement) async {
     final kind = movement['source_kind'] as String? ?? 'SERVICE';
     final id = (movement['source_id'] ?? movement['document_id']) as String;
-    if (kind == 'SERVICE') {
+    if (kind == 'SERVICE' || kind == 'PURCHASE') {
       await openDocument(id);
       return;
     }
@@ -206,6 +206,7 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
   String sourceLabel(String? kind) =>
       const {
         'SERVICE': 'Услуги',
+        'PURCHASE': 'Поступление товаров',
         'GOODS': 'Товарная продажа',
         'DEBT': 'Начальный долг',
         'ASSET': 'Основное средство',

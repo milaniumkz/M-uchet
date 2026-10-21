@@ -1025,7 +1025,9 @@ class _BankReviewState extends State<BankReview> {
               .where(
                 (d) => refundMode
                     ? (d['paid'] as num) > 0
-                    : ['ISSUED', 'POSTED'].contains(d['status']) &&
+                    : (['ISSUED', 'POSTED'].contains(d['status']) ||
+                              (d['kind'] == 'PURCHASE_GOODS' &&
+                                  d['status'] == 'DRAFT')) &&
                           (d['outstanding'] as num) > 0,
               )
               .toList();

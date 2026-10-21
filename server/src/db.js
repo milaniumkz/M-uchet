@@ -105,6 +105,9 @@ export async function openDatabase({ connectionString = process.env.DATABASE_URL
       if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=24').get()) {
         await db.exec(await readFile(new URL('../migrations/023_commercial_refunds.sql', import.meta.url), 'utf8'));
       }
+      if (!await db.prepare('SELECT 1 FROM schema_versions WHERE version=25').get()) {
+        await db.exec(await readFile(new URL('../migrations/024_goods_purchases.sql', import.meta.url), 'utf8'));
+      }
     });
     return db;
   } catch (error) { await pool.end(); throw error; }

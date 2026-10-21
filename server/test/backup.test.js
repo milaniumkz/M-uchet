@@ -91,6 +91,15 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  await request('PUT',prefix+`/commercial-documents/${refundDoc.id}/payments/${refund.id}`,{version:1,amount:2500,businessDate:'2026-10-23'},session.token,key());
  await request('POST',prefix+`/commercial-documents/${refundDoc.id}/payments/${refund.id}/void`,{version:2},session.token,key());
  await request('POST',prefix+`/commercial-documents/${refundDoc.id}/payments/${refund.id}/restore`,{version:3},session.token,key());
+ const purchaseSupplier=await request('POST',prefix+'/resources/suppliers',{data:{name:'SYNTHETIC RESTORED GOODS SUPPLIER'}},session.token,key());
+ const purchaseProduct=await request('POST',prefix+'/resources/nomenklatura',{data:{name:'SYNTHETIC RESTORED PURCHASE PRODUCT'}},session.token,key());
+ const purchaseWallet=await request('POST',prefix+'/wallets',{name:'SYNTHETIC RESTORED PURCHASE WALLET'},session.token,key());
+ await request('POST',prefix+`/wallets/${purchaseWallet.id}/transactions`,{type:'CAPITAL',amount:7,description:'SYNTHETIC PURCHASE FUNDING',businessDate:'2026-01-01'},session.token,key());
+ const purchase=await request('POST',prefix+'/commercial-documents',{kind:'PURCHASE_GOODS',counterpartyId:purchaseSupplier.id,vatBasisPoints:1600,businessDate:'2026-01-20',items:[{productId:purchaseProduct.id,warehouseId:warehouse.id,quantity:'3',unitPrice:2}]},session.token,key());
+ await request('POST',prefix+`/commercial-documents/${purchase.id}/payments`,{walletId:purchaseWallet.id,amount:7,businessDate:'2026-01-05'},session.token,key());
+ const postedPurchase=await request('POST',prefix+`/commercial-documents/${purchase.id}/post`,{},session.token,key());
+ await request('PUT',prefix+`/commercial-documents/${purchase.id}`,{version:postedPurchase.version,items:[{productId:purchaseProduct.id,warehouseId:warehouse.id,quantity:'5',unitPrice:2}]},session.token,key());
+ await request('POST',prefix+'/inventory/writeoffs',{productId:purchaseProduct.id,warehouseId:warehouse.id,quantity:1,reason:'SYNTHETIC PURCHASE CONSUMPTION',businessDate:'2026-01-31'},session.token,key());
  await app.close();app=undefined;
  const dump=await open(join(directory,'backup.dump'),'wx',0o600);
  try{await docker(['pg_dump','-U','muchet','-d','muchet',`--schema=${schema}`,'--format=custom','--no-owner','--no-acl'],'ignore',dump.fd);}finally{await dump.close();}
@@ -123,8 +132,11 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const refundCopy=(await restored.inject({url:prefix+`/commercial-documents/${refundDoc.id}`,headers})).json();assert.equal(refundCopy.paid,7500);assert.equal(refundCopy.outstanding,2500);
  const refundHistory=(await restored.inject({url:prefix+`/commercial-documents/${refundDoc.id}/payments/${refund.id}/history`,headers})).json();assert.equal(refundHistory.payment.kind,'REFUND');assert.equal(refundHistory.payment.version,4);assert.equal(refundHistory.items.length,3);assert.equal(refundHistory.payment.business_date,'2026-10-23');
  assert.equal(wallets.find(w=>w.id===refundWallet.id).balance,7500);
+ const purchaseCopy=(await restored.inject({url:prefix+`/commercial-documents/${purchase.id}`,headers})).json();assert.equal(purchaseCopy.kind,'PURCHASE_GOODS');assert.equal(purchaseCopy.version,3);assert.equal(purchaseCopy.data.total,12);assert.equal(purchaseCopy.paid,7);assert.equal(purchaseCopy.outstanding,5);
+ const purchaseLayers=(await restored.inject({url:prefix+`/commercial-documents/${purchase.id}/stock`,headers})).json().items;assert.equal(purchaseLayers.reduce((n,b)=>n+b.quantity,0),4);assert.equal(purchaseLayers.reduce((n,b)=>n+b.quantity*b.unit_cost,0),10);assert.equal(purchaseLayers.reduce((n,b)=>n+b.original_quantity,0),5);
+ assert.equal(wallets.find(w=>w.id===purchaseWallet.id).balance,0);
  const countCopy=(await restored.inject({url:prefix+`/inventory/counts/${stockCount.id}`,headers})).json();assert.equal(countCopy.status,'POSTED');assert.equal(countCopy.version,3);assert.equal(countCopy.data.lines[0].effect.cost,110);
- const stockCopy=(await restored.inject({url:prefix+'/inventory/balances',headers})).json();assert.equal(stockCopy.summary.value,55);assert.equal(stockCopy.items[0].quantity,1);
+ const stockCopy=(await restored.inject({url:prefix+'/inventory/balances',headers})).json();assert.equal(stockCopy.summary.value,65);assert.equal(stockCopy.items.find(i=>i.product_id===product.id).quantity,1);
  const countHistory=(await restored.inject({url:prefix+`/inventory/counts/${stockCount.id}/history`,headers})).json();assert.equal(countHistory.items.length,2);
  const shifts=(await restored.inject({url:prefix+'/shifts',headers})).json().items;assert.equal(shifts.find(s=>s.id===shift.id).difference,-1);
  const invitations=(await restored.inject({url:prefix+'/invitations',headers})).json().items;assert.ok(invitations.some(i=>i.id===invitation.id));

@@ -1,3 +1,4 @@
+import { isPurchaseKind, purchaseItems, syncPurchaseStock } from './purchase-stock.js';
 import { readSnapshot } from './db.js';
 import { planSettlements } from './settlement-planner.js';
 import { randomUUID } from 'node:crypto';
@@ -9,8 +10,9 @@ const labels = {
   SALE_INVOICE: 'Счёт на оплату',
   SALE_ACT: 'Акт оказанных услуг',
   PURCHASE_ACT: 'Поступление услуг',
+  PURCHASE_GOODS: 'Поступление товаров',
 };
-const prefixes = { SALE_INVOICE: 'СЧ', SALE_ACT: 'АКТ', PURCHASE_ACT: 'ПУ' };
+const prefixes = { SALE_INVOICE: 'СЧ', SALE_ACT: 'АКТ', PURCHASE_ACT: 'ПУ', PURCHASE_GOODS: 'ПТ' };
 const round = (numerator, denominator) => Number((numerator + denominator / 2n) / denominator);
 function quantity(value) {
   if (typeof value !== 'string' || !/^\d{1,9}(\.\d{1,3})?$/.test(value))
@@ -83,7 +85,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
   const input = async (company, body, kind, previous) => {
     if (!Object.hasOwn(labels, kind)) fail(400, 'invalid_document_kind');
     const date = businessDate(body.businessDate ?? previous?.business_date, company.timezone);
-    const partyKind = kind === 'PURCHASE_ACT' ? 'suppliers' : 'clients';
+    const partyKind = isPurchaseKind(kind) ? 'suppliers' : 'clients';
     const counterpartyId = text(body.counterpartyId, 'counterpartyId');
     const party = await db
       .prepare('SELECT data FROM documents WHERE company_id=? AND kind=? AND id=?')
@@ -102,18 +104,20 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     const vatBasisPoints = integer(body.vatBasisPoints ?? 0, 'vatBasisPoints');
     if (vatBasisPoints && (date < '2026-01-01' || date > '2026-12-31'))
       fail(422, 'vat_rule_version_unavailable');
-    if (vatBasisPoints && kind !== 'PURCHASE_ACT' && !issuer.vat_registered)
+    if (vatBasisPoints && !isPurchaseKind(kind) && !issuer.vat_registered)
       fail(422, 'vat_registration_required');
     if (body.vatReason !== undefined && typeof body.vatReason !== 'string') fail(400, 'invalid_vat_reason');
     const vatReason = body.vatReason === undefined ? '' : body.vatReason.trim();
     if (vatReason.length > 1000) fail(400, 'invalid_vat_reason');
-    if (!vatBasisPoints && kind !== 'PURCHASE_ACT' && issuer.vat_registered && !vatReason)
+    if (!vatBasisPoints && !isPurchaseKind(kind) && issuer.vat_registered && !vatReason)
       fail(422, 'vat_reason_required');
-    const totals = serviceTotals(body.items, vatBasisPoints),
+    const goods = kind === 'PURCHASE_GOODS' ? await purchaseItems(db,company.id,body.items,previous) : null;
+    const totals = serviceTotals(goods ?? body.items, vatBasisPoints),
       vatTreatment = body.vatTreatment ?? 'IN_COST';
     if (!['IN_COST', 'PENDING'].includes(vatTreatment)) fail(400, 'invalid_vat_treatment');
-    if (vatTreatment === 'PENDING' && (!issuer.vat_registered || !totals.vat || kind !== 'PURCHASE_ACT'))
+    if (vatTreatment === 'PENDING' && (!issuer.vat_registered || !totals.vat || !isPurchaseKind(kind)))
       fail(422, 'invalid_pending_input_vat');
+    if(goods)totals.items=totals.items.map((line,i)=>({...goods[i],...line}));
     return {
       businessDate: date,
       scope: scope(body.scope),
@@ -199,13 +203,13 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     return entry;
   };
   const replacePayment = async (company, payment, doc, debtAmount = 0) => {
-    const sale = (doc.kind !== 'PURCHASE_ACT') !== (payment.kind === 'REFUND');
+    const sale = (!isPurchaseKind(doc.kind)) !== (payment.kind === 'REFUND');
     const cash = `wallet:${payment.wallet_id}`;
     const advanceAmount = payment.amount - debtAmount;
     const lines = [
       { account: cash, debit: sale ? payment.amount : 0, credit: sale ? 0 : payment.amount },
-      { account: doc.kind !== 'PURCHASE_ACT' ? 'receivables' : 'payables', debit: sale ? 0 : debtAmount, credit: sale ? debtAmount : 0 },
-      { account: doc.kind !== 'PURCHASE_ACT' ? 'customer_advances' : 'supplier_advances', debit: sale ? 0 : advanceAmount, credit: sale ? advanceAmount : 0 },
+      { account: !isPurchaseKind(doc.kind) ? 'receivables' : 'payables', debit: sale ? 0 : debtAmount, credit: sale ? debtAmount : 0 },
+      { account: !isPurchaseKind(doc.kind) ? 'customer_advances' : 'supplier_advances', debit: sale ? 0 : advanceAmount, credit: sale ? advanceAmount : 0 },
     ].filter(line => line.debit + line.credit > 0);
     const old = await db.prepare('SELECT * FROM journal WHERE id=?').get(payment.journal_id);
     if (
@@ -227,7 +231,8 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     }
   };
   // Recompute document recognition; actual cash payments retain their identities.
-  const projectDocument = async (company, doc) => {
+  const projectDocument = async (company, doc, request) => {
+    await syncPurchaseStock(db, company, doc, () => access(request, 'inventory.receive'));
     for (const posting of await db
       .prepare(
         'SELECT p.id,j.* FROM commercial_postings p JOIN journal j ON j.id=p.journal_id WHERE p.company_id=? AND p.document_id=? AND p.active=TRUE',
@@ -255,7 +260,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         'UPDATE commercial_postings SET active=FALSE WHERE company_id=? AND document_id=? AND active=TRUE',
       )
       .run(company.id, doc.id);
-    const sale = doc.kind !== 'PURCHASE_ACT',
+    const sale = !isPurchaseKind(doc.kind),
       recognized = doc.kind !== 'SALE_INVOICE' && doc.status === 'POSTED';
     if (recognized) {
       const lines = sale
@@ -265,7 +270,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
           ]
         : [
             {
-              account: 'expenses',
+              account: doc.kind === 'PURCHASE_GOODS' ? 'inventory' : 'expenses',
               debit: doc.data.vatTreatment === 'PENDING' ? doc.data.net : doc.data.total,
             },
             { account: 'payables', credit: doc.data.total },
@@ -344,7 +349,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     if(status!==undefined&&!['DRAFT','ISSUED','POSTED','CANCELLED'].includes(status))fail(400,'invalid_document_status');
     const counterparty=request.query.counterpartyId;
     if(counterparty!==undefined)text(counterparty,'counterpartyId');
-    const filters = `company_id=? AND business_date>=? AND business_date<=?${direction === undefined ? '' : direction === 'sales' ? " AND kind IN ('SALE_INVOICE','SALE_ACT')" : " AND kind='PURCHASE_ACT'"}${search ? " AND (number ILIKE ? OR data->'counterparty'->>'name' ILIKE ?)" : ''}${selected === undefined ? '' : ' AND project_id IS NOT DISTINCT FROM ?'}${kind === undefined ? '' : ' AND kind=?'}${counterparty===undefined?'':" AND data->>'counterpartyId'=?"}${reportScope===undefined?'':" AND scope IN (?,'BOTH')"}${status===undefined?'':' AND status=?'}`;
+    const filters = `company_id=? AND business_date>=? AND business_date<=?${direction === undefined ? '' : direction === 'sales' ? " AND kind IN ('SALE_INVOICE','SALE_ACT')" : " AND kind IN ('PURCHASE_ACT','PURCHASE_GOODS')"}${search ? " AND (number ILIKE ? OR data->'counterparty'->>'name' ILIKE ?)" : ''}${selected === undefined ? '' : ' AND project_id IS NOT DISTINCT FROM ?'}${kind === undefined ? '' : ' AND kind=?'}${counterparty===undefined?'':" AND data->>'counterpartyId'=?"}${reportScope===undefined?'':" AND scope IN (?,'BOTH')"}${status===undefined?'':' AND status=?'}`;
     const params = [request.params.companyId, from, to,
       ...(search ? [pattern, pattern] : []),
       ...(selected === undefined ? [] : [selected === 'unassigned' ? null : selected]),
@@ -441,7 +446,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         )
         .run(JSON.stringify(parsed.data), parsed.businessDate, parsed.scope, parsed.projectId, now(), old.id);
       const doc = await get(company.id, old.id);
-      await projectDocument(company, await projectionBasis(doc));
+      await projectDocument(company, await projectionBasis(doc), request);
       return dto(doc);
     }),
   );
@@ -456,7 +461,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         .prepare('UPDATE commercial_documents SET status=?,version=version+1,updated_at=? WHERE id=?')
         .run(old.kind === 'SALE_INVOICE' ? 'ISSUED' : 'POSTED', now(), old.id);
       const doc = await get(company.id, old.id);
-      await projectDocument(company, await projectionBasis(doc));
+      await projectDocument(company, await projectionBasis(doc), request);
       return dto(doc);
     }),
   );
@@ -471,7 +476,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         )
         .run(now(), old.id);
       const doc = await get(company.id, old.id);
-      await projectDocument(company, await projectionBasis(doc));
+      await projectDocument(company, await projectionBasis(doc), request);
       return dto(doc);
     }),
   );
@@ -505,7 +510,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       const body = object(request.body),
         kind = body.kind ?? 'PAYMENT';
       if (!['PAYMENT', 'REFUND'].includes(kind)) fail(400, 'invalid_payment_kind');
-      if (kind === 'PAYMENT' && !['ISSUED', 'POSTED'].includes(doc.status)) fail(409, 'document_not_posted');
+      if (kind === 'PAYMENT' && !['ISSUED', 'POSTED'].includes(doc.status) && !(doc.kind === 'PURCHASE_GOODS' && doc.status === 'DRAFT')) fail(409, 'document_not_posted');
       const
         amount = integer(body.amount, 'amount', 1),
         walletId = text(body.walletId, 'walletId'),
@@ -520,9 +525,9 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       if (kind === 'PAYMENT' && amount > current.outstanding) fail(409, 'overpayment');
       planSettlements({recognized:basis.kind !== 'SALE_INVOICE' && basis.status === 'POSTED', total:basis.data.total,
         recognitionDate:basis.business_date, payments:[...await relatedPayments(basis), {id,amount,business_date:date,kind}]});
-      const sale = (basis.kind !== 'PURCHASE_ACT') !== (kind === 'REFUND'),
+      const sale = (!isPurchaseKind(basis.kind)) !== (kind === 'REFUND'),
         advance = basis.kind === 'SALE_INVOICE' || basis.status !== 'POSTED' || date < basis.business_date;
-      const account = basis.kind !== 'PURCHASE_ACT'
+      const account = !isPurchaseKind(basis.kind)
           ? advance
             ? 'customer_advances'
             : 'receivables'
@@ -564,7 +569,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
           now(),
           entry.id,
         );
-      await projectDocument(company, basis);
+      await projectDocument(company, basis, request);
       return { id, document: await dto(await get(company.id, doc.id)) };
   };
   route('POST', '/:id/payments', request => command(request, 'documents.settle', 'document.payment', company => settleDocument(company, request)));
@@ -591,10 +596,10 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       await db
         .prepare('UPDATE commercial_payments SET amount=?,wallet_id=?,business_date=?,version=version+1 WHERE id=?')
         .run(amount, walletId, date, old.id);
-      await projectDocument(company, await projectionBasis(doc));
+      await projectDocument(company, await projectionBasis(doc), request);
       await db
         .prepare('UPDATE wallet_entries SET wallet_id=?,amount=? WHERE company_id=? AND journal_id=?')
-        .run(walletId, (doc.kind === 'PURCHASE_ACT') !== (old.kind === 'REFUND') ? -amount : amount, company.id, old.journal_id);
+        .run(walletId, (isPurchaseKind(doc.kind)) !== (old.kind === 'REFUND') ? -amount : amount, company.id, old.journal_id);
       return { id: old.id, document: await dto(doc) };
     }),
   );
@@ -653,7 +658,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
             now(),
             entry.id,
           );
-        await projectDocument(company, await projectionBasis(doc));
+        await projectDocument(company, await projectionBasis(doc), request);
         return { id: old.id, document: await dto(doc) };
       }),
     );
@@ -697,6 +702,16 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       .all(doc.company_id, doc.id);
     return { items: rows.map((r) => ({ ...r, lines: JSON.parse(r.lines) })) };
   });
+  route('GET', '/:id/stock', request => readSnapshot(db, async () => {
+    const company = await access(request,'documents.read');await access(request,'inventory.read');
+    const doc=await get(company.id,request.params.id);
+    if(doc.kind!=='PURCHASE_GOODS')fail(400,'invalid_document_kind');
+    return {items:await db.prepare(`SELECT b.*,s.original_quantity,p.data::jsonb->>'name' AS product_name,w.data::jsonb->>'name' AS warehouse_name
+      FROM commercial_stock_layers s JOIN batches b ON b.company_id=s.company_id AND b.id=s.batch_id
+      LEFT JOIN documents p ON p.company_id=b.company_id AND p.kind='nomenklatura' AND p.id=b.product_id
+      LEFT JOIN documents w ON w.company_id=b.company_id AND w.kind='warehouses' AND w.id=b.warehouse_id
+      WHERE s.company_id=? AND s.document_id=? ORDER BY b.received_sequence`).all(company.id,doc.id)};
+  }));
   route('GET', '/:id/files', async (request) => {
     await access(request, 'documents.read');
     await access(request, 'files.read');
@@ -749,7 +764,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     const doc = await dto(await get(request.params.companyId, request.params.id)),
       d = doc.data;
     const money = (amount) => (amount / 100).toFixed(2);
-    const html = `<!doctype html><html lang="ru"><meta charset="utf-8"><title>${escape(doc.number)}</title><body><h1>${labels[doc.kind]} № ${escape(doc.number)}</h1><p>от ${escape(doc.business_date)} · ${escape(doc.status)}</p><p>Исполнитель / фирма: ${escape(d.issuer.legal_name)} · БИН/ИИН ${escape(d.issuer.identifier)}</p><p>Контрагент: ${escape(d.counterparty.name)} · ${escape(d.counterparty.identifier ?? d.counterparty.bin ?? '')}</p><table border="1" cellpadding="8"><thead><tr><th>Услуга</th><th>Ед.</th><th>Количество</th><th>Цена без НДС</th><th>Без НДС</th><th>НДС</th><th>Итого</th></tr></thead><tbody>${d.items.map((l) => `<tr><td>${escape(l.description)}</td><td>${escape(l.unit)}</td><td>${escape(l.quantity)}</td><td>${money(l.unitPrice)}</td><td>${money(l.net)}</td><td>${money(l.vat)}</td><td>${money(l.total)}</td></tr>`).join('')}</tbody></table><p>Без НДС: ${money(d.net)} · НДС: ${money(d.vat)} · Итого: ${money(d.total)}</p><p>${escape(d.vatReason)}</p><p>${escape(d.note)}</p><p>Ответственные лица / подписи: __________________________</p><p>Внутренняя печатная форма. Не является ЭСФ или фискальным чеком. Подписи не проставлены.</p></body></html>`;
+    const html = `<!doctype html><html lang="ru"><meta charset="utf-8"><title>${escape(doc.number)}</title><body><h1>${labels[doc.kind]} № ${escape(doc.number)}</h1><p>от ${escape(doc.business_date)} · ${escape(doc.status)}</p><p>${isPurchaseKind(doc.kind) ? 'Покупатель / фирма' : 'Исполнитель / фирма'}: ${escape(d.issuer.legal_name)} · БИН/ИИН ${escape(d.issuer.identifier)}</p><p>${doc.kind === 'PURCHASE_GOODS' ? 'Поставщик' : 'Контрагент'}: ${escape(d.counterparty.name)} · ${escape(d.counterparty.identifier ?? d.counterparty.bin ?? '')}</p><table border="1" cellpadding="8"><thead><tr><th>${doc.kind === 'PURCHASE_GOODS' ? 'Товар / склад' : 'Услуга'}</th><th>Ед.</th><th>Количество</th><th>Цена без НДС</th><th>Без НДС</th><th>НДС</th><th>Итого</th></tr></thead><tbody>${d.items.map((l) => `<tr><td>${escape(l.description)}${l.warehouseName ? '<br>Склад: '+escape(l.warehouseName) : ''}</td><td>${escape(l.unit)}</td><td>${escape(l.quantity)}</td><td>${money(l.unitPrice)}</td><td>${money(l.net)}</td><td>${money(l.vat)}</td><td>${money(l.total)}</td></tr>`).join('')}</tbody></table><p>Без НДС: ${money(d.net)} · НДС: ${money(d.vat)} · Итого: ${money(d.total)}</p><p>${escape(d.vatReason)}</p><p>${escape(d.note)}</p><p>Ответственные лица / подписи: __________________________</p><p>Внутренняя печатная форма. Не является ЭСФ или фискальным чеком. Подписи не проставлены.</p></body></html>`;
     // HTML contains escaped text and no executable content. API-wide CSP remains default-src none.
     reply
       .type('text/html; charset=utf-8')

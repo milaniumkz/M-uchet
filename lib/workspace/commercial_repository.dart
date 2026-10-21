@@ -1,10 +1,14 @@
 import '../backend/rest/api_client.dart';
 import '../backend/rest/retriable_command.dart';
 
+bool isPurchaseKind(Object? kind) =>
+    kind == 'PURCHASE_ACT' || kind == 'PURCHASE_GOODS';
+
 const documentLabels = {
   'SALE_INVOICE': 'Счёт на оплату',
   'SALE_ACT': 'Акт оказанных услуг',
   'PURCHASE_ACT': 'Поступление услуг',
+  'PURCHASE_GOODS': 'Поступление товаров',
 };
 const documentStatuses = {
   'DRAFT': 'Черновик',

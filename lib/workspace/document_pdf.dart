@@ -12,7 +12,7 @@ Future<Uint8List> documentPdf(Map<String, dynamic> doc, String currency) async {
   final data = jsonObject(doc['data']),
       issuer = jsonObject(data['issuer']),
       party = jsonObject(data['counterparty']);
-  final purchase = doc['kind'] == 'PURCHASE_ACT';
+  final purchase = isPurchaseKind(doc['kind']);
   final pdf = pw.Document(
       title: '${documentLabels[doc['kind']]} ${doc['number']}',
       author: issuer['legal_name'] as String,
@@ -53,7 +53,7 @@ Future<Uint8List> documentPdf(Map<String, dynamic> doc, String currency) async {
                   'IBAN: ${issuer['bank_iban']} · БИК: ${issuer['bank_bic'] ?? ''}'),
             pw.SizedBox(height: 10),
             pw.Text(
-                '${purchase ? 'Исполнитель' : 'Заказчик'}: ${party['name']}'),
+                '${purchase ? (doc['kind'] == 'PURCHASE_GOODS' ? 'Поставщик' : 'Исполнитель') : 'Заказчик'}: ${party['name']}'),
             pw.Text('БИН / ИИН: ${party['identifier'] ?? party['bin'] ?? ''}'),
             if (party['address'] is String)
               pw.Text('Адрес: ${party['address']}'),
@@ -82,7 +82,7 @@ Future<Uint8List> documentPdf(Map<String, dynamic> doc, String currency) async {
                 data: (data['items'] as List).map((raw) {
                   final line = jsonObject(raw);
                   return [
-                    line['description'],
+                    '${line['description']}${line['warehouseName'] == null ? '' : '\nСклад: ${line['warehouseName']}'}',
                     line['unit'],
                     line['quantity'],
                     moneyText(line['unitPrice'] as num, currency),

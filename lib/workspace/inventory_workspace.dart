@@ -6,6 +6,7 @@ import '../backend/rest/api_client.dart';
 import '../backend/rest/retriable_command.dart';
 import '../backend/rest/repositories.dart';
 import 'commercial_repository.dart';
+import 'commercial_detail.dart';
 
 class InventoryWorkspace extends StatefulWidget {
   const InventoryWorkspace({
@@ -118,6 +119,25 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
           setState(() => error = e.message);
         }
       }
+    }
+  }
+
+  Future<void> openPurchase(String id) async {
+    try {
+      await showCommercialDocument(
+        context,
+        api: widget.api,
+        companyId: widget.companyId,
+        documentId: id,
+        currency: widget.currency,
+        projects: widget.projects,
+        onChanged: () async {
+          await widget.onChanged();
+          await load();
+        },
+      );
+    } on BackendException catch (e) {
+      if (mounted) setState(() => error = e.message);
     }
   }
 
@@ -305,6 +325,9 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
           warehouseId: warehouseFilter,
           revision: reportRevision,
           operations: view == 'operations',
+          onOpenPurchase: hasCompanyPermission(context, 'documents.read')
+              ? openPurchase
+              : null,
         ),
       if (view == 'batches')
         ...batches
@@ -339,6 +362,14 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                         children: [
                           Text('Всего: ${b['quantity']}'),
                           Text('Резерв: ${b['reserved']}'),
+                          if (b['source_document_id'] != null &&
+                              hasCompanyPermission(context, 'documents.read'))
+                            TextButton(
+                              onPressed: () => openPurchase(
+                                b['source_document_id'] as String,
+                              ),
+                              child: const Text('Открыть поступление'),
+                            ),
                           Text(
                             'Доступно: ${(b['quantity'] as num) - (b['reserved'] as num)}',
                           ),

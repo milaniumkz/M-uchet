@@ -15,7 +15,7 @@ migrate:
 seed-dev:
 	cd server && node --env-file=../.env src/seed.js
 test:
-	cd server && APP_ENV=test node --env-file=../.env --test test/api.test.js test/bank-csv.test.js test/payroll-calculation.test.js test/profit.test.js test/debt-migration.test.js test/settlement-planner.test.js
+	cd server && APP_ENV=test node --env-file=../.env --test test/api.test.js test/bank-csv.test.js test/payroll-calculation.test.js test/profit.test.js test/debt-migration.test.js test/settlement-planner.test.js test/purchase-stock.test.js
 test-e2e:
 	cd server && APP_ENV=test node --env-file=../.env --test test/http.test.js
 test-client-e2e:

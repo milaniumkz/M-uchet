@@ -1032,7 +1032,12 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     ResourceDto? resource;
     if (!['GOODS', 'ASSET'].contains(kind)) {
       await perform(() async {
-        if (['SALE_INVOICE', 'SALE_ACT', 'PURCHASE_ACT'].contains(kind)) {
+        if ([
+          'SALE_INVOICE',
+          'SALE_ACT',
+          'PURCHASE_ACT',
+          'PURCHASE_GOODS',
+        ].contains(kind)) {
           entity = jsonObject(
             await api.request('GET', [...base, 'commercial-documents', id]),
           );
@@ -1053,7 +1058,12 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     if (!mounted || company?.id != selectedCompany.id) {
       return;
     }
-    if (['SALE_INVOICE', 'SALE_ACT', 'PURCHASE_ACT'].contains(kind)) {
+    if ([
+      'SALE_INVOICE',
+      'SALE_ACT',
+      'PURCHASE_ACT',
+      'PURCHASE_GOODS',
+    ].contains(kind)) {
       await showDialog<void>(
         context: navigator.currentContext!,
         barrierDismissible: false,

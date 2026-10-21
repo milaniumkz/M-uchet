@@ -1,3 +1,4 @@
+import { isPurchaseKind } from './purchase-stock.js';
 import { randomUUID } from 'node:crypto';
 import { bankRows } from './bank-csv.js';
 import { fail, text, hashToken } from './security.js';
@@ -106,8 +107,8 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
       const doc=await db.prepare('SELECT * FROM commercial_documents WHERE company_id=? AND id=?').get(company.id,documentId);
       if(!doc)fail(404,'document_not_found');
       const refund = type === 'DOCUMENT_REFUND';
-      if((doc.kind==='PURCHASE_ACT')!==((row.amount<0)!==refund))fail(400,'bank_direction_mismatch');
-      if(!refund && !['ISSUED','POSTED'].includes(doc.status))fail(409,'document_not_posted');
+      if((isPurchaseKind(doc.kind))!==((row.amount<0)!==refund))fail(400,'bank_direction_mismatch');
+      if(!refund && !['ISSUED','POSTED'].includes(doc.status) && !(doc.kind==='PURCHASE_GOODS' && doc.status==='DRAFT'))fail(409,'document_not_posted');
     }
     await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'bank_row',row.id,JSON.stringify(row),request.user.id);
     await db.prepare('UPDATE bank_import_rows SET classification=?,project_id=?,document_id=?,matched_entry_id=?,version=version+1 WHERE id=?').run(type,projectId,documentId,type==='EXISTING'?body.entryId:null,row.id);

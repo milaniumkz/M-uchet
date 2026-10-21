@@ -9,6 +9,31 @@ import 'commercial_editor.dart';
 import 'document_pdf.dart';
 import 'document_files.dart';
 
+Future<void> showCommercialDocument(
+  BuildContext context, {
+  required BackendClient api,
+  required String companyId,
+  required String documentId,
+  required String currency,
+  required List<Map<String, dynamic>> projects,
+  required Future<void> Function() onChanged,
+}) async {
+  final document = await CommercialRepository(api, companyId).get(documentId);
+  if (!context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => CommercialDetail(
+      api: api,
+      companyId: companyId,
+      currency: currency,
+      document: document,
+      projects: projects,
+      onChanged: onChanged,
+    ),
+  );
+}
+
 class CommercialDetail extends StatefulWidget {
   const CommercialDetail({
     super.key,
@@ -70,7 +95,7 @@ class _CommercialDetailState extends State<CommercialDetail> {
         }
         doc = updated;
       });
-      if (tab > 0 && tab < 4) await showRelated(tab);
+      if (tab > 0 && tab != 4) await showRelated(tab);
       await widget.onChanged();
     } on BackendException catch (e) {
       if (mounted) {
@@ -100,7 +125,7 @@ class _CommercialDetailState extends State<CommercialDetail> {
         companyId: widget.companyId,
         currency: widget.currency,
         projects: widget.projects,
-        direction: doc['kind'] == 'PURCHASE_ACT' ? 'purchases' : 'sales',
+        direction: isPurchaseKind(doc['kind']) ? 'purchases' : 'sales',
         document: doc,
       ),
     );
@@ -120,7 +145,9 @@ class _CommercialDetailState extends State<CommercialDetail> {
     try {
       final result = await repository.related(
         doc['id'] as String,
-        index == 1
+        index == 5
+            ? 'stock'
+            : index == 1
             ? 'movements'
             : index == 2
             ? 'history'
@@ -387,11 +414,18 @@ class _CommercialDetailState extends State<CommercialDetail> {
                             : null,
                         child: const Text('Создать акт'),
                       ),
-                    if (['ISSUED', 'POSTED'].contains(doc['status']) &&
+                    if ((['ISSUED', 'POSTED'].contains(doc['status']) ||
+                            (doc['kind'] == 'PURCHASE_GOODS' &&
+                                doc['status'] == 'DRAFT')) &&
                         (doc['outstanding'] as num) > 0)
                       FilledButton(
                         onPressed: enabled && canSettle ? pay : null,
-                        child: const Text('Связать оплату'),
+                        child: Text(
+                          doc['kind'] == 'PURCHASE_GOODS' &&
+                                  doc['status'] == 'DRAFT'
+                              ? 'Предоплата поставщику'
+                              : 'Связать оплату',
+                        ),
                       ),
                     if ((doc['paid'] as num? ?? 0) > 0)
                       OutlinedButton.icon(
@@ -400,7 +434,7 @@ class _CommercialDetailState extends State<CommercialDetail> {
                             : null,
                         icon: const Icon(Icons.undo),
                         label: Text(
-                          doc['kind'] == 'PURCHASE_ACT'
+                          isPurchaseKind(doc['kind'])
                               ? 'Возврат от поставщика'
                               : 'Возврат клиенту',
                         ),
@@ -450,6 +484,12 @@ class _CommercialDetailState extends State<CommercialDetail> {
                       onPressed: busy ? null : () => showRelated(3),
                       child: const Text('Оплаты'),
                     ),
+                    if (doc['kind'] == 'PURCHASE_GOODS' &&
+                        hasCompanyPermission(context, 'inventory.read'))
+                      TextButton(
+                        onPressed: busy ? null : () => showRelated(5),
+                        child: const Text('Склад поступления'),
+                      ),
                     TextButton(
                       onPressed: busy ? null : () => setState(() => tab = 4),
                       child: const Text('Вложения'),
@@ -463,6 +503,26 @@ class _CommercialDetailState extends State<CommercialDetail> {
                             key: ValueKey(doc['id']),
                             repository: repository,
                             documentId: doc['id'] as String,
+                          )
+                        : tab == 5
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Текущий остаток партий этого поступления; склад общий для проектов фирмы.',
+                              ),
+                              for (final layer in related)
+                                Card(
+                                  child: ListTile(
+                                    title: Text(
+                                      '${layer['product_name'] ?? layer['product_id']} · ${layer['warehouse_name'] ?? layer['warehouse_id']}',
+                                    ),
+                                    subtitle: Text(
+                                      'Поступило: ${layer['original_quantity']} · Остаток: ${layer['quantity']} · Резерв: ${layer['reserved']}\nЦена слоя: ${moneyText(layer['unit_cost'] as num, widget.currency)}',
+                                    ),
+                                  ),
+                                ),
+                            ],
                           )
                         : tab == 0
                         ? Column(
@@ -481,7 +541,9 @@ class _CommercialDetailState extends State<CommercialDetail> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '${jsonObject(data['issuer'])['legal_name']} → ${party['name']}',
+                                      isPurchaseKind(doc['kind'])
+                                          ? '${party['name']} → ${jsonObject(data['issuer'])['legal_name']}'
+                                          : '${jsonObject(data['issuer'])['legal_name']} → ${party['name']}',
                                       style: const TextStyle(
                                         fontSize: 17,
                                         fontWeight: FontWeight.bold,
@@ -509,6 +571,10 @@ class _CommercialDetailState extends State<CommercialDetail> {
                                             Text(
                                               '${l['quantity']} ${l['unit']}',
                                             ),
+                                            if (l['warehouseName'] != null)
+                                              Text(
+                                                'Склад: ${l['warehouseName']}',
+                                              ),
                                             Text(
                                               moneyText(
                                                 l['total'] as num,

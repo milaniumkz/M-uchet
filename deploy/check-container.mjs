@@ -87,7 +87,7 @@ try {
     assert.equal(response.status, expected, `${method} ${path}`);
     return response.json();
   }
-  assert.equal((await request("GET", "/health")).schemaVersion, 24);
+  assert.equal((await request("GET", "/health")).schemaVersion, 25);
   assert.equal((await fetch(origin + "/")).status, 200);
   assert.ok([403, 404].includes((await fetch(origin + "/.env")).status));
   await request(
@@ -262,6 +262,58 @@ try {
     ).balance,
     0,
   );
+  const purchaseSupplier = await request(
+    "POST",
+    base + "/resources/suppliers",
+    { data: { name: "SYNTHETIC PURCHASE SUPPLIER" } },
+  );
+  const purchaseProduct = await request(
+    "POST",
+    base + "/resources/nomenklatura",
+    { data: { name: "SYNTHETIC PURCHASE PRODUCT" } },
+  );
+  const purchaseWallet = await request("POST", base + "/wallets", {
+    name: "SYNTHETIC PURCHASE WALLET",
+  });
+  await request("POST", base + `/wallets/${purchaseWallet.id}/transactions`, {
+    type: "CAPITAL",
+    amount: 7,
+    businessDate: "2026-01-01",
+    description: "SYNTHETIC PURCHASE FUNDS",
+  });
+  const purchase = await request("POST", base + "/commercial-documents", {
+    kind: "PURCHASE_GOODS",
+    counterpartyId: purchaseSupplier.id,
+    businessDate: "2026-01-20",
+    vatBasisPoints: 1600,
+    items: [
+      {
+        productId: purchaseProduct.id,
+        warehouseId: stockWarehouse.id,
+        quantity: "3",
+        unitPrice: 2,
+      },
+    ],
+  });
+  const purchaseBase = base + `/commercial-documents/${purchase.id}`;
+  await request("POST", purchaseBase + "/payments", {
+    walletId: purchaseWallet.id,
+    amount: 7,
+    businessDate: "2026-01-05",
+  });
+  const purchasePosted = await request("POST", purchaseBase + "/post", {});
+  await request("PUT", purchaseBase, {
+    version: purchasePosted.version,
+    items: [
+      {
+        productId: purchaseProduct.id,
+        warehouseId: stockWarehouse.id,
+        quantity: "5",
+        unitPrice: 2,
+      },
+    ],
+  });
+  assert.equal((await request("GET", purchaseBase)).outstanding, 5);
   const form = new FormData();
   form.append(
     "file",
@@ -429,6 +481,22 @@ try {
     ])
   ).trim();
   assert.equal(restoredRefundHistory, "4");
+  const restoredPurchase = (
+    await compose([
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "muchet",
+      "-d",
+      "restored",
+      "-At",
+      "-c",
+      `SELECT d.kind || ':' || (d.data->>'total') || ':' || d.version::text || ':' || SUM(b.quantity)::text || ':' || SUM(b.quantity*b.unit_cost)::text FROM public.commercial_documents d JOIN public.commercial_stock_layers s ON s.document_id=d.id JOIN public.batches b ON b.id=s.batch_id WHERE d.id='${purchase.id}' GROUP BY d.id`,
+    ])
+  ).trim();
+  assert.equal(restoredPurchase, "PURCHASE_GOODS:12:3:5:12");
   const restoredDebt = (
     await compose([
       "exec",
@@ -572,7 +640,7 @@ try {
   ).token;
   assert.ok(token);
   console.log(
-    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected commercial refund and history, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, stock balances and corrected counts, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
+    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected commercial refund and history, paid goods purchase and FIFO layers, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, stock balances and corrected counts, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
   );
 } catch (error) {
   try {

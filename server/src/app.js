@@ -296,7 +296,7 @@ export async function createApp(options = {}) {
   })));
   app.get('/v1/companies/:companyId/inventory', { preHandler: auth }, async request => {
     const company=await access(request, 'inventory.read');
-    const items=await db.prepare('SELECT * FROM batches WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId,request.query.after??'',pageLimit(request.query));
+    const items=await db.prepare('SELECT b.*,s.document_id AS source_document_id FROM batches b LEFT JOIN commercial_stock_layers s ON s.company_id=b.company_id AND s.batch_id=b.id WHERE b.company_id=? AND b.id>? ORDER BY b.id LIMIT ?').all(request.params.companyId,request.query.after??'',pageLimit(request.query));
     return {businessDate:businessDate(undefined,company.timezone),items,nextCursor:items.length===pageLimit(request.query)?items.at(-1).id:null};
   });
   app.post('/v1/companies/:companyId/orders/preview',{preHandler:auth},async request=>{

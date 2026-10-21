@@ -138,6 +138,17 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
     }
   }
 
+  String countText(num value, String one, String few, String many) {
+    final n = value.toInt(), last = n % 10, rest = n % 100;
+    return '$n ${rest >= 11 && rest <= 14
+        ? many
+        : last == 1
+        ? one
+        : last >= 2 && last <= 4
+        ? few
+        : many}';
+  }
+
   Widget summaryCard(String label, String value, double available) => Container(
     width: available >= 900 ? (available - 52) / 3 : available,
     padding: const EdgeInsets.all(20),
@@ -225,7 +236,7 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
         Text(
           widget.direction == 'sales'
               ? 'Счета и акты услуг в одном месте.'
-              : 'Поступление услуг и расчёты с поставщиками.',
+              : 'Поступления товаров и услуг, расчёты с поставщиками.',
           style: const TextStyle(color: Color(0xFF626E84)),
         ),
         const SizedBox(height: 12),
@@ -294,6 +305,30 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
               ),
             ],
           ),
+        if (widget.direction == 'purchases')
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              for (final option in const {
+                '': 'Все поступления',
+                'PURCHASE_GOODS': 'Товары',
+                'PURCHASE_ACT': 'Услуги',
+              }.entries)
+                ChoiceChip(
+                  label: Text(option.value),
+                  selected: (kind ?? '') == option.key,
+                  onSelected: loading
+                      ? null
+                      : (_) {
+                          setState(
+                            () => kind = option.key.isEmpty ? null : option.key,
+                          );
+                          load();
+                        },
+                ),
+            ],
+          ),
         const SizedBox(height: 24),
         if (summary != null) ...[
           LayoutBuilder(
@@ -303,7 +338,12 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
               children: [
                 summaryCard(
                   'За выбранный период',
-                  '${summary!['count']} документов',
+                  countText(
+                    summary!['count'] as num,
+                    'документ',
+                    'документа',
+                    'документов',
+                  ),
                   size.maxWidth,
                 ),
                 summaryCard(
@@ -313,7 +353,12 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
                 ),
                 summaryCard(
                   'Нужно завершить',
-                  '${summary!['drafts']} черновиков',
+                  countText(
+                    summary!['drafts'] as num,
+                    'черновик',
+                    'черновика',
+                    'черновиков',
+                  ),
                   size.maxWidth,
                 ),
               ],
@@ -372,48 +417,54 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: const [
-                  DataColumn(label: Text('Документ')),
-                  DataColumn(label: Text('Контрагент')),
-                  DataColumn(label: Text('Дата')),
-                  DataColumn(label: Text('Сумма')),
-                  DataColumn(label: Text('Статус')),
-                ],
-                rows: items
-                    .map(
-                      (doc) => DataRow(
-                        onSelectChanged: (_) => open(doc),
-                        cells: [
-                          DataCell(
-                            Text(
-                              '${documentLabels[doc['kind']]}\n${doc['number']}',
-                            ),
-                          ),
-                          DataCell(
-                            Text(
-                              jsonObject(
-                                    jsonObject(doc['data'])['counterparty'],
-                                  )['name']
-                                  as String,
-                            ),
-                          ),
-                          DataCell(Text(doc['business_date'] as String)),
-                          DataCell(
-                            Text(
-                              moneyText(
-                                jsonObject(doc['data'])['total'] as num,
-                                widget.currency,
+            child: LayoutBuilder(
+              builder: (context, tableBox) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: tableBox.maxWidth),
+                  child: DataTable(
+                    showCheckboxColumn: false,
+                    columns: const [
+                      DataColumn(label: Text('Документ')),
+                      DataColumn(label: Text('Контрагент')),
+                      DataColumn(label: Text('Дата')),
+                      DataColumn(label: Text('Сумма')),
+                      DataColumn(label: Text('Статус')),
+                    ],
+                    rows: items
+                        .map(
+                          (doc) => DataRow(
+                            onSelectChanged: (_) => open(doc),
+                            cells: [
+                              DataCell(
+                                Text(
+                                  '${documentLabels[doc['kind']]}\n${doc['number']}',
+                                ),
                               ),
-                            ),
+                              DataCell(
+                                Text(
+                                  jsonObject(
+                                        jsonObject(doc['data'])['counterparty'],
+                                      )['name']
+                                      as String,
+                                ),
+                              ),
+                              DataCell(Text(doc['business_date'] as String)),
+                              DataCell(
+                                Text(
+                                  moneyText(
+                                    jsonObject(doc['data'])['total'] as num,
+                                    widget.currency,
+                                  ),
+                                ),
+                              ),
+                              DataCell(status(doc)),
+                            ],
                           ),
-                          DataCell(status(doc)),
-                        ],
-                      ),
-                    )
-                    .toList(),
+                        )
+                        .toList(),
+                  ),
+                ),
               ),
             ),
           )

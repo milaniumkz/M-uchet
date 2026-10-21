@@ -16,12 +16,14 @@ class InventoryBalancesView extends StatefulWidget {
     required this.warehouseId,
     required this.revision,
     this.operations = false,
+    this.onOpenPurchase,
   });
   final BackendClient api;
   final String companyId, currency, scope;
   final String? warehouseId;
   final int revision;
   final bool operations;
+  final Future<void> Function(String)? onOpenPurchase;
   @override
   State<InventoryBalancesView> createState() => _InventoryBalancesViewState();
 }
@@ -222,9 +224,21 @@ class _InventoryBalancesViewState extends State<InventoryBalancesView> {
             builder: (_) => AlertDialog(
               title: const Text('Складская операция'),
               content: SelectableText(
-                'Номер: ${row['id']}\nДата: ${d['businessDate'] ?? row['created_at']}\nКоличество: ${d['quantity']}\nСтоимость: ${moneyText(d['cost'] as num, widget.currency)}\n${d['reason'] ?? ''}\n${d['journalId'] == null ? 'Без денежного движения' : 'Проводка: ${d['journalId']}'}',
+                'Номер: ${row['id']}\nДата: ${d['businessDate'] ?? row['created_at']}\nКоличество: ${d['quantity']}\nСтоимость: ${moneyText(d['cost'] as num, widget.currency)}\n${d['reason'] ?? ''}\n${d['documentId'] != null
+                    ? 'Основание: ${d['documentNumber']} · ${d['status']}'
+                    : d['journalId'] == null
+                    ? 'Без денежного движения'
+                    : 'Проводка: ${d['journalId']}'}',
               ),
               actions: [
+                if (d['documentId'] != null && widget.onOpenPurchase != null)
+                  TextButton(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await widget.onOpenPurchase!(d['documentId'] as String);
+                    },
+                    child: const Text('Открыть поступление'),
+                  ),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Закрыть'),
