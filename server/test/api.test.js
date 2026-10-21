@@ -1408,3 +1408,52 @@ test('bank unmatch releases only an existing link with version, permissions and 
  assert.equal((await f.api('GET','/wallets')).body.items[0].balance,1300);
 
 });
+
+test('combined client statement reconciles services, goods and opening debts without duplicate cash or lost corrections',async t=>{
+ const f=await commercialFixture(t),path=`/counterparties/clients/${f.client.id}/statement`;
+ const act=(await f.api('POST','/commercial-documents',f.body)).body;await f.api('POST',`/commercial-documents/${act.id}/post`,{});await f.api('POST',`/commercial-documents/${act.id}/payments`,{walletId:f.wallet.id,amount:4000,businessDate:'2026-10-20'});
+ const refs=await f.catalog();await f.api('POST','/inventory/receipts',{...refs,quantity:10,unitCost:100,businessDate:'2026-01-01'});
+ const goods=(await f.api('POST','/orders',{counterpartyId:f.client.id,projectId:f.project.id,businessDate:'2026-10-20',items:[{...refs,quantity:2,unitPrice:400}]})).body;
+ for(const action of ['reserve','ship'])assert.equal((await f.api('POST',`/orders/${goods.id}/${action}`,{})).status,200);
+ const paid=(await f.api('POST',`/orders/${goods.id}/payments`,{walletId:f.wallet.id,amount:300,businessDate:'2026-10-19'})).body;
+ const debt=(await f.api('POST','/debts',{type:'AR',counterpartyId:f.client.id,amount:500,projectId:f.project.id,businessDate:'2026-10-20'})).body;
+ await f.api('POST',`/debts/${debt.id}/settlements`,{walletId:f.wallet.id,amount:200,businessDate:'2026-10-19'});
+ let response=await f.api('GET',path);assert.equal(response.status,200,JSON.stringify(response.body));let result=response.body;
+ const closing=(data,account)=>data.accounts.find(a=>a.account===account).closing;
+ assert.equal(closing(result,'receivables'),6800);assert.equal(closing(result,'customer_advances'),0);
+ assert.deepEqual(new Set(result.items.map(r=>r.source_kind)),new Set(['SERVICE','GOODS','DEBT']));assert.equal(new Set(result.items.map(r=>r.id)).size,result.items.length);
+ const before=(await f.api('GET',path+'?to=2026-10-19')).body;assert.equal(closing(before,'receivables'),0);assert.equal(closing(before,'customer_advances'),-500);
+ const first=(await f.api('GET',path+'?limit=1')).body,second=(await f.api('GET',path+'?limit=1&after='+first.nextCursor)).body;assert.deepEqual(first.accounts,result.accounts);assert.notEqual(first.items[0].id,second.items[0].id);
+ assert.ok((await f.api('GET',path+'?projectId=unassigned')).body.accounts.every(a=>a.closing===0));
+ await f.api('POST','/periods/2026-10/close',{});
+ assert.equal((await f.api('POST',`/orders/${goods.id}/payments/${paid.id}/void`,{version:1})).status,200);
+ result=(await f.api('GET',path)).body;assert.equal(closing(result,'receivables'),7100);assert.equal(closing(result,'customer_advances'),0);
+ const current=(await f.api('GET',`/debts/${debt.id}`)).body;
+ assert.equal((await f.api('PUT',`/debts/${debt.id}`,{version:current.version,type:'AR',counterpartyId:f.client.id,amount:100,businessDate:'2026-10-20',projectId:f.project.id})).status,200);
+ result=(await f.api('GET',path)).body;assert.equal(closing(result,'receivables'),6800);assert.equal(closing(result,'customer_advances'),-100);
+ assert.equal((await f.api('GET','/wallets')).body.items[0].balance,4200);
+ const otherProject=(await f.api('POST','/projects',{name:'SYNTHETIC GOODS PROJECT B'})).body;
+ const moved=await f.api('PUT',`/orders/${goods.id}`,{expectedRevision:0,projectId:otherProject.id,businessDate:'2026-11-20',reason:'SYNTHETIC PROJECT CORRECTION'});assert.equal(moved.status,200,JSON.stringify(moved.body));
+ assert.equal(closing((await f.api('GET',path+`?projectId=${f.project.id}`)).body,'receivables'),6000);
+ assert.equal(closing((await f.api('GET',path+`?projectId=${otherProject.id}`)).body,'receivables'),800);
+ assert.equal(closing((await f.api('GET',path+'?to=2026-10-31')).body,'receivables'),6000);
+
+ const services=(await f.api('GET',path.replace('/statement','/service-statement'))).body;assert.equal(closing(services,'receivables'),6000);
+ const reader=await f.user('combined-statement-reader@example.test');await f.api('PUT',`/members/${reader.id}`,{permissions:['catalog.read','accounting.read','documents.read']});
+ assert.equal((await f.call('GET',f.prefix+path,null,reader.token)).status,403);assert.equal((await f.call('GET',f.prefix+path.replace('/statement','/service-statement'),null,reader.token)).status,200);
+ assert.equal((await f.api('GET',path+'?scope=BOTH')).status,400);assert.equal((await f.api('GET',path+'?after=invalid')).status,400);
+});
+
+test('combined supplier statement includes assets and initial payables and their historical corrections',async t=>{
+ const f=await commercialFixture(t),path=`/counterparties/suppliers/${f.supplier.id}/statement`;
+ const purchase=(await f.api('POST','/commercial-documents',{...f.body,kind:'PURCHASE_ACT',counterpartyId:f.supplier.id})).body;await f.api('POST',`/commercial-documents/${purchase.id}/post`,{});
+ const assetBody={name:'SYNTHETIC STATEMENT ASSET',inventoryNumber:'STATEMENT-1',supplierId:f.supplier.id,cost:4321,residual:321,lifeMonths:2,acquisitionDate:'2026-01-15',depreciationStart:'2026-02',method:'LINEAR_MONTHLY',policyAcknowledged:true,projectId:f.project.id};
+ const asset=(await f.api('POST','/assets',assetBody)).body;assert.equal((await f.api('POST',`/assets/${asset.id}/activate`,{})).status,200);
+ await f.api('POST','/debts',{type:'AP',counterpartyId:f.supplier.id,amount:500,projectId:f.project.id,businessDate:'2026-01-10'});
+ let result=(await f.api('GET',path)).body;assert.equal(result.accounts.find(a=>a.account==='payables').closing,-14821);assert.ok(result.items.some(r=>r.source_kind==='ASSET'&&r.source_id===asset.id));
+ const active=(await f.api('GET',`/assets/${asset.id}`)).body;
+ const edit=await f.api('PUT',`/assets/${asset.id}`,{...assetBody,version:active.version,cost:5000});assert.equal(edit.status,200,JSON.stringify(edit.body));
+ result=(await f.api('GET',path)).body;assert.equal(result.accounts.find(a=>a.account==='payables').closing,-15500);
+ const outsider=await f.user('statement-outsider@example.test');assert.equal((await f.call('GET',f.prefix+path,null,outsider.token)).status,404);
+ assert.equal((await f.api('GET',`/counterparties/clients/${f.supplier.id}/statement`)).status,404);
+});

@@ -1,3 +1,7 @@
+import 'company_access.dart';
+import 'goods_workspace.dart';
+import 'debts_workspace.dart';
+import 'assets_workspace.dart';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
 import '../backend/rest/repositories.dart';
@@ -28,16 +32,25 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
   String? projectId, error, statementCursor, documentCursor;
   String scope = 'ACCOUNTING';
   DateTimeRange? period;
-  bool busy = false;
+  bool busy = false, initialized = false, allSources = false;
+  bool get canReadAll => [
+    'orders.read',
+    'debts.read',
+    'assets.read',
+  ].every((p) => hasCompanyPermission(context, p));
   List<Map<String, dynamic>> accounts = [], movements = [], documents = [];
   int documentCount = 0;
   CommercialRepository get repo =>
       CommercialRepository(widget.api, widget.companyId);
   String date(DateTime value) => value.toIso8601String().substring(0, 10);
   @override
-  void initState() {
-    super.initState();
-    load();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!initialized) {
+      initialized = true;
+      allSources = canReadAll;
+      load();
+    }
   }
 
   Future<void> load({
@@ -56,7 +69,7 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
             'counterparties',
             widget.kind,
             widget.party.id,
-            'service-statement',
+            allSources ? 'statement' : 'service-statement',
           ],
           query: {
             'limit': '50',
@@ -149,6 +162,56 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
     }
   }
 
+  Future<void> openMovement(Map<String, dynamic> movement) async {
+    final kind = movement['source_kind'] as String? ?? 'SERVICE';
+    final id = (movement['source_id'] ?? movement['document_id']) as String;
+    if (kind == 'SERVICE') {
+      await openDocument(id);
+      return;
+    }
+    if (kind == 'GOODS') {
+      await showGoodsOrder(
+        context,
+        api: widget.api,
+        companyId: widget.companyId,
+        orderId: id,
+        currency: widget.currency,
+        projects: widget.projects,
+        onChanged: widget.onChanged,
+      );
+    } else if (kind == 'DEBT') {
+      await showOpeningDebt(
+        context,
+        api: widget.api,
+        companyId: widget.companyId,
+        debtId: id,
+        currency: widget.currency,
+        projects: widget.projects,
+        onChanged: widget.onChanged,
+      );
+    } else if (kind == 'ASSET') {
+      await showAssetDetails(
+        context,
+        api: widget.api,
+        companyId: widget.companyId,
+        assetId: id,
+        currency: widget.currency,
+        projects: widget.projects,
+        onChanged: widget.onChanged,
+      );
+    }
+    if (mounted) await load();
+  }
+
+  String sourceLabel(String? kind) =>
+      const {
+        'SERVICE': 'Услуги',
+        'GOODS': 'Товарная продажа',
+        'DEBT': 'Начальный долг',
+        'ASSET': 'Основное средство',
+      }[kind] ??
+      'Услуги';
+
   String label(String key) =>
       const {
         'receivables': 'Долг покупателя',
@@ -188,14 +251,29 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
           ].whereType<String>().where((v) => v.isNotEmpty).join(' · '),
         ),
         const SizedBox(height: 24),
-        const Text(
-          'Расчёты по услугам',
-          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        Text(
+          allSources ? 'Взаиморасчёты с контрагентом' : 'Расчёты по услугам',
+          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
-        const Text(
-          'Счета и акты услуг, оплаты и авансы. Начальные долги, товары и приобретение основных средств в эту сводку не входят. Изменения исходных документов пересчитывают расчёты.',
+        Text(
+          allSources
+              ? 'Услуги, товарные продажи, начальные долги и приобретение ОС по связанным проводкам, включая оплаты и исправления. Ручные проводки без связи с контрагентом и нераспознанные старые источники требуют отдельной сверки.'
+              : 'Счета и акты услуг, оплаты и авансы. Начальные долги, товары и приобретение основных средств в эту сводку не входят. Изменения исходных документов пересчитывают расчёты.',
         ),
+        if (canReadAll)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Включать товары, начальные долги и ОС'),
+            value: allSources,
+            onChanged: busy
+                ? null
+                : (v) {
+                    setState(() => allSources = v);
+                    load();
+                  },
+          ),
+
         const SizedBox(height: 20),
         Wrap(
           spacing: 12,
@@ -345,7 +423,7 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   Text(
-                    '${m['business_date']} · ${projectName(m['project_id'] as String?)}',
+                    '${sourceLabel(m['source_kind'] as String?)} · ${m['business_date']} · ${projectName(m['project_id'] as String?)}',
                   ),
                   const SizedBox(height: 8),
                   ...(m['lines'] as List)
@@ -356,9 +434,7 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
                         ),
                       ),
                   TextButton(
-                    onPressed: busy
-                        ? null
-                        : () => openDocument(m['document_id'] as String),
+                    onPressed: busy ? null : () => openMovement(m),
                     child: const Text('Открыть документ-основание'),
                   ),
                 ],
@@ -376,7 +452,9 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
           'Документы · $documentCount',
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
         ),
-        const Text('Документы за выбранный период, проект и вид учёта.'),
+        const Text(
+          'Счета и акты услуг за выбранный период, проект и вид учёта. Другие основания доступны выше в движениях.',
+        ),
         ...documents.map(
           (d) => Card(
             child: ListTile(

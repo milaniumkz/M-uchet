@@ -104,6 +104,9 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const goodsCopy=(await restored.inject({url:prefix+`/orders/${goods.id}`,headers})).json();assert.equal(goodsCopy.paid,150);assert.equal(goodsCopy.outstanding,48);assert.equal(goodsCopy.data.items[0].productName,'SYNTHETIC RESTORE GOODS');
  const paymentCopy=(await restored.inject({url:prefix+`/orders/${goods.id}/payments`,headers})).json().items[0];assert.equal(paymentCopy.version,4);assert.equal(paymentCopy.voided,false);
  assert.equal(wallets.find(w=>w.id===goodsWallet.id).balance,150);
+ const combinedResponse=await restored.inject({url:prefix+`/counterparties/clients/${client.id}/statement`,headers});assert.equal(combinedResponse.statusCode,200);
+ const combined=combinedResponse.json();assert.equal(combined.accounts.find(a=>a.account==='receivables').closing,12393);assert.equal(combined.accounts.find(a=>a.account==='customer_advances').closing,-100);assert.ok(combined.items.some(r=>r.source_kind==='GOODS'));assert.ok(combined.items.some(r=>r.source_kind==='DEBT'));assert.ok(combined.items.some(r=>r.source_kind==='SERVICE'));
+ const supplierStatement=(await restored.inject({url:prefix+`/counterparties/suppliers/${supplier.id}/statement`,headers})).json();assert.equal(supplierStatement.accounts.find(a=>a.account==='payables').closing,-4321);
  const shifts=(await restored.inject({url:prefix+'/shifts',headers})).json().items;assert.equal(shifts.find(s=>s.id===shift.id).difference,-1);
  const invitations=(await restored.inject({url:prefix+'/invitations',headers})).json().items;assert.ok(invitations.some(i=>i.id===invitation.id));
  const salaryCopy=(await restored.inject({url:prefix+`/payroll/${payroll.id}`,headers})).json();assert.equal(salaryCopy.data.calculation.net,17137500);assert.equal(salaryCopy.paid,1000000);assert.equal(salaryCopy.data.ruleSnapshot.version,'KZ_REGULAR_RESIDENT_PAYROLL_2026_V1');

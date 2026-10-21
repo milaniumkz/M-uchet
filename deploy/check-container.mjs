@@ -134,6 +134,43 @@ try {
     amount: 200,
     businessDate: "2026-02-10",
   });
+  const reconciliation = await request(
+    "GET",
+    base + `/counterparties/clients/${client.id}/statement`,
+  );
+  assert.equal(
+    reconciliation.accounts.find((a) => a.account === "receivables").closing,
+    0,
+  );
+  assert.equal(
+    reconciliation.accounts.find((a) => a.account === "customer_advances")
+      .closing,
+    -100,
+  );
+  const bankImport = await request("POST", base + "/bank-imports", {
+    walletId: wallet.id,
+    csv: "date;reference;debit;credit;description\n2026-01-05;container-debt-link;0;3.00;SYNTHETIC DEBT RECEIPT",
+  });
+  const bankRow = (
+      await request("GET", base + `/bank-imports/${bankImport.id}`)
+    ).items[0],
+    bankPath = base + `/bank-imports/${bankImport.id}/rows/${bankRow.id}`;
+  const candidate = (await request("GET", bankPath + "/candidates")).items[0];
+  await request("PUT", bankPath, {
+    version: 1,
+    classification: "EXISTING",
+    entryId: candidate.id,
+  });
+  await request("POST", bankPath + "/post", { version: 2 });
+  assert.equal(
+    (await request("GET", base + `/bank-imports/${bankImport.id}`)).items[0]
+      .reconciliation_status,
+    "MATCHED",
+  );
+  await request("POST", bankPath + "/unmatch", {
+    version: 3,
+    reason: "SYNTHETIC CONTAINER RECONCILIATION CORRECTION",
+  });
   const task = await request("POST", base + "/tax-calendar", {
     title: "SYNTHETIC CONTAINER TASK",
     dueDate: "2026-01-26",
@@ -388,15 +425,14 @@ try {
   ).token;
   assert.ok(token);
   console.log(
-    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected opening debt, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
+    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected opening debt, combined counterparty statement, bank unmatch, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
   );
 } catch (error) {
   try {
     console.error(
-      (await compose(["logs", "--tail", "30", "api", "db"])).replaceAll(
-        databasePassword,
-        "[REDACTED]",
-      ).replaceAll(adminPassword,"[REDACTED]"),
+      (await compose(["logs", "--tail", "30", "api", "db"]))
+        .replaceAll(databasePassword, "[REDACTED]")
+        .replaceAll(adminPassword, "[REDACTED]"),
     );
   } catch {}
   throw error;

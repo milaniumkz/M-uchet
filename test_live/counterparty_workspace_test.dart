@@ -35,7 +35,7 @@ void main() {
           RealNetwork(),
         ),
       );
-      late String companyId;
+      late String companyId, partyId, walletId;
       Future<Map<String, dynamic>> post(
         List<String> path,
         Map<String, dynamic> body,
@@ -79,6 +79,8 @@ void main() {
           [...base, 'wallets'],
           {'name': 'SYNTHETIC PARTY BANK'},
         );
+        partyId = party['id'] as String;
+        walletId = wallet['id'] as String;
         final invoice = await post(
           [...base, 'commercial-documents'],
           {
@@ -151,12 +153,84 @@ void main() {
       }
 
       await click(find.text('SYNTHETIC CLIENT CARD'));
-      expect(find.text('Расчёты по услугам'), findsOneWidget);
+      expect(find.text('Взаиморасчёты с контрагентом'), findsOneWidget);
       expect(find.text('60,00 ₸'), findsOneWidget);
       await click(find.text('Открыть документ-основание').first);
-      expect(find.text('Расчёты по услугам'), findsNothing);
+      expect(find.text('Взаиморасчёты с контрагентом'), findsNothing);
       await click(find.byTooltip('Закрыть'));
       expect(find.byType(CounterpartyWorkspace), findsOneWidget);
+      await tester.runAsync(() async {
+        final base = ['v1', 'companies', companyId];
+        final debt = await post(
+          [...base, 'debts'],
+          {
+            'type': 'AR',
+            'counterpartyId': partyId,
+            'amount': 500,
+            'businessDate': '2026-10-20',
+          },
+        );
+        await post(
+          [...base, 'debts', debt['id'] as String, 'settlements'],
+          {'walletId': walletId, 'amount': 200, 'businessDate': '2026-10-19'},
+        );
+      });
+      await tester.scrollUntilVisible(
+        find.byTooltip('Обновить расчёты'),
+        -400,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await click(find.byTooltip('Обновить расчёты'));
+      expect(find.text('63,00 ₸'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.textContaining('Начальный долг ·').first,
+        400,
+        scrollable: find.byType(Scrollable).last,
+      );
+      final debtCard = find
+          .ancestor(
+            of: find.textContaining('Начальный долг ·').first,
+            matching: find.byType(Card),
+          )
+          .first;
+      await click(
+        find.descendant(
+          of: debtCard,
+          matching: find.text('Открыть документ-основание'),
+        ),
+      );
+      expect(find.text('Начальный долг и оплаты'), findsOneWidget);
+      await click(find.byTooltip('Закрыть долг'));
+      await tester.scrollUntilVisible(
+        find.byType(SwitchListTile),
+        -400,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await click(find.byType(SwitchListTile));
+      expect(
+        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isFalse,
+      );
+      await tester.scrollUntilVisible(
+        find.text('Расчёты по услугам'),
+        -400,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('Расчёты по услугам'), findsOneWidget);
+      expect(find.text('60,00 ₸'), findsOneWidget);
+      await click(find.byType(SwitchListTile));
+      expect(
+        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isTrue,
+      );
+      await tester.scrollUntilVisible(
+        find.text('Взаиморасчёты с контрагентом'),
+        -400,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('Взаиморасчёты с контрагентом'), findsOneWidget);
+      expect(find.text('63,00 ₸'), findsOneWidget);
+
       await tester.scrollUntilVisible(
         find.text('Документы · 2'),
         500,
@@ -167,7 +241,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('Расчёты по услугам'),
+        find.text('Взаиморасчёты с контрагентом'),
         -500,
         scrollable: find.byType(Scrollable).last,
       );

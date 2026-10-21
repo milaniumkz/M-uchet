@@ -1,3 +1,4 @@
+import { readSnapshot } from './db.js';
 import { randomUUID } from 'node:crypto';
 import { fail, integer, text, scope, businessDate } from './security.js';
 import { postJournal, projectReference, syncWalletBalances } from './accounting.js';
@@ -393,7 +394,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       nextCursor: rows.length === pageLimit(request.query) ? rows.at(-1).id : null,
     };
   });
-  app.get('/v1/companies/:companyId/counterparties/:kind/:id/service-statement',{preHandler:auth},async request=>{
+  app.get('/v1/companies/:companyId/counterparties/:kind/:id/service-statement',{preHandler:auth},request=>readSnapshot(db,async()=>{
     const company=await access(request,'catalog.read');await access(request,'documents.read');await access(request,'accounting.read');
     const kind=request.params.kind;if(!['clients','suppliers'].includes(kind))fail(400,'invalid_counterparty_kind');
     const party=await db.prepare('SELECT * FROM documents WHERE company_id=? AND kind=? AND id=?').get(company.id,kind,request.params.id);
@@ -429,7 +430,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       AND EXISTS(SELECT 1 FROM journal_lines l WHERE l.entry_id=j.id AND l.account IN (?,?)) ORDER BY j.business_date,j.id LIMIT ?`).all(...params,...accounts,from,to,cursorDate,cursorId,...accounts,limit);
     return {counterparty:{...party,data:JSON.parse(party.data)},scope:ledgerScope,from,to,accounts:accounts.map(account=>balances.find(b=>b.account===account)??{account,opening:0,debit:0,credit:0,closing:0}),items:rows,
       nextCursor:rows.length===limit?Buffer.from(JSON.stringify({date:rows.at(-1).business_date,id:rows.at(-1).id})).toString('base64url'):null};
-  });
+  }));
   route('GET', '/:id', async (request) => {
     await access(request, 'documents.read');
     return dto(await get(request.params.companyId, request.params.id));

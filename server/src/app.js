@@ -1,3 +1,4 @@
+import { registerCounterpartyStatements } from './counterparty-statements.js';
 import { registerDebtRoutes } from './debts.js';
 import { safeErrorSummary } from './logging.js';
 import { registerSearchRoutes } from './search.js';
@@ -500,6 +501,7 @@ export async function createApp(options = {}) {
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
   registerInvitationRoutes(app,{db,auth,owner,object});
+  registerCounterpartyStatements(app,{db,auth,access,pageLimit});
   registerDebtRoutes(app,{db,auth,access,command,object,pageLimit});
   registerSearchRoutes(app,{db,auth});
   registerTaxCalendarRoutes(app,{db,auth,access,command,object,pageLimit});

@@ -76,3 +76,5 @@ POST: `{data:{name:"Товар"}}` → `{id,data,version:1,createdAt,updatedAt}`
 `GET /audit?after=0&limit=50` (`audit.read`) → `{items:[{sequence,company_id,actor_id,action,resource_id,created_at}]}`. Не включает пароли/токены. Это аудит прикладных изменений, не отдельная защищённая от администратора БД система журналирования.
 
 Начальные взаиморасчёты: [DEBTS.md](DEBTS.md). Сопоставление выписки и снятие ошибочной связи: [ACCESS_CASH.md](ACCESS_CASH.md).
+
+Общие взаиморасчёты: [COUNTERPARTIES.md](COUNTERPARTIES.md); отдельная сверка услуг сохранена для ограниченного доступа.
