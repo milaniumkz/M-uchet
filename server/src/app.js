@@ -1,3 +1,5 @@
+import { registerStockCounts } from './stock-counts.js';
+import { registerInventoryReports } from './inventory-reports.js';
 import { registerDashboard } from './dashboard.js';
 import { registerCounterpartyStatements } from './counterparty-statements.js';
 import { registerDebtRoutes } from './debts.js';
@@ -235,11 +237,12 @@ export async function createApp(options = {}) {
     return (await access(request, `${group}.${operation}`));
   };
   const document = row => ({ id: row.id, data: JSON.parse(row.data), version: row.version, createdAt: row.created_at, updatedAt: row.updated_at });
-  const documentData = body => {
+  const documentData = (body,kind) => {
     const data = object(body.data);
     for (const key of ['companyId','company_id','idCompany','tenantId','role','permissions','ownerId','is_admin','password']) {
       if (Object.hasOwn(data, key)) fail(400, 'server_owned_field');
     }
+    if(kind==='nomenklatura'&&Object.hasOwn(data,'minimumStock'))integer(data.minimumStock,'minimumStock');
     return JSON.stringify(data);
   };
   app.get('/v1/companies/:companyId/resources/:kind', { preHandler: auth }, async request => {
@@ -254,7 +257,7 @@ export async function createApp(options = {}) {
   });
   app.post('/v1/companies/:companyId/resources/:kind', { preHandler: auth }, async request => {
     (await resourceAccess(request, 'write'));
-    const data = documentData(object(request.body)), id = randomUUID(), timestamp = now();
+    const data = documentData(object(request.body),request.params.kind), id = randomUUID(), timestamp = now();
     const write=async()=>{
       await db.prepare('INSERT INTO documents VALUES(?,?,?,?,1,?,?)').run(request.params.companyId,request.params.kind,id,data,timestamp,timestamp);
       return {id,data:JSON.parse(data),version:1,createdAt:timestamp,updatedAt:timestamp};
@@ -264,7 +267,7 @@ export async function createApp(options = {}) {
   });
   app.put('/v1/companies/:companyId/resources/:kind/:id', { preHandler: auth }, async request => {
     (await resourceAccess(request, 'write'));
-    const body = object(request.body), data = documentData(body), version = integer(body.version, 'version', 1);
+    const body = object(request.body), data = documentData(body,request.params.kind), version = integer(body.version, 'version', 1);
     const write=async()=>{
       const old=await db.prepare('SELECT * FROM documents WHERE company_id=? AND kind=? AND id=? AND version=? FOR UPDATE').get(request.params.companyId,request.params.kind,request.params.id,version);
       if(!old)fail(409,'version_conflict');
@@ -285,13 +288,16 @@ export async function createApp(options = {}) {
     const id = randomUUID();
     (await db.prepare('INSERT INTO batches(id,company_id,product_id,warehouse_id,scope,quantity,reserved,unit_cost,created_at) VALUES(?,?,?,?,?,?,0,?,?)').run(id, company.id, item.productId, item.warehouseId, parsed.scope, item.quantity, unitCost, now()));
     const amount = item.quantity * unitCost;
-    if (amount) (await postJournal(db, company, { scope: parsed.scope, projectId:parsed.projectId,businessDate:body.businessDate, description: `Receipt ${id}`, lines: [{ account: 'inventory', debit: amount }, { account: 'payables', credit: amount }] }));
-    return { id, ...item, unitCost, scope: parsed.scope, projectId:parsed.projectId };
+    const date=businessDate(body.businessDate,company.timezone);
+    const posting=amount ? await postJournal(db, company, { scope: parsed.scope, projectId:parsed.projectId,businessDate:date, description: `Receipt ${id}`, lines: [{ account: 'inventory', debit: amount }, { account: 'payables', credit: amount }] }) : null;
+    const data={ id, ...item, unitCost, cost:amount, scope: parsed.scope, projectId:parsed.projectId,businessDate:date,journalId:posting?.id??null };
+    await db.prepare('INSERT INTO movements VALUES(?,?,?,?,?)').run(id,company.id,'RECEIPT',JSON.stringify(data),now());
+    return data;
   })));
   app.get('/v1/companies/:companyId/inventory', { preHandler: auth }, async request => {
-    (await access(request, 'inventory.read'));
+    const company=await access(request, 'inventory.read');
     const items=await db.prepare('SELECT * FROM batches WHERE company_id=? AND id>? ORDER BY id LIMIT ?').all(request.params.companyId,request.query.after??'',pageLimit(request.query));
-    return {items,nextCursor:items.length===pageLimit(request.query)?items.at(-1).id:null};
+    return {businessDate:businessDate(undefined,company.timezone),items,nextCursor:items.length===pageLimit(request.query)?items.at(-1).id:null};
   });
   app.post('/v1/companies/:companyId/orders/preview',{preHandler:auth},async request=>{
     const body=object(request.body),company=await access(request,body.orderId?'orders.edit':'orders.write');
@@ -503,6 +509,8 @@ export async function createApp(options = {}) {
   });
   registerInvitationRoutes(app,{db,auth,owner,object});
   registerDashboard(app,{db,auth,access});
+  registerInventoryReports(app,{db,auth,access,pageLimit});
+  registerStockCounts(app,{db,auth,access,command,object,pageLimit});
   registerCounterpartyStatements(app,{db,auth,access,pageLimit});
   registerDebtRoutes(app,{db,auth,access,command,object,pageLimit});
   registerSearchRoutes(app,{db,auth});

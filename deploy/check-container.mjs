@@ -87,7 +87,7 @@ try {
     assert.equal(response.status, expected, `${method} ${path}`);
     return response.json();
   }
-  assert.equal((await request("GET", "/health")).schemaVersion, 22);
+  assert.equal((await request("GET", "/health")).schemaVersion, 23);
   assert.equal((await fetch(origin + "/")).status, 200);
   assert.ok([403, 404].includes((await fetch(origin + "/.env")).status));
   await request(
@@ -182,6 +182,35 @@ try {
     dueDateConfirmed: true,
     source: "SYNTHETIC CHECKED SOURCE",
   });
+  const stockProduct = await request("POST", base + "/resources/nomenklatura", {
+    data: { name: "SYNTHETIC CONTAINER STOCK", minimumStock: 9 },
+  });
+  const stockWarehouse = await request("POST", base + "/resources/warehouses", {
+    data: { name: "SYNTHETIC CONTAINER WAREHOUSE" },
+  });
+  await request("POST", base + "/inventory/receipts", {
+    productId: stockProduct.id,
+    warehouseId: stockWarehouse.id,
+    quantity: 10,
+    unitCost: 23,
+  });
+  const countDraft = await request("POST", base + "/inventory/counts", {
+    warehouseId: stockWarehouse.id,
+    reason: "SYNTHETIC CONTAINER COUNT",
+    lines: [{ productId: stockProduct.id, countedQuantity: 8 }],
+  });
+  const countPosted = await request(
+    "POST",
+    base + `/inventory/counts/${countDraft.id}/post`,
+    { version: countDraft.version },
+  );
+  await request("PUT", base + `/inventory/counts/${countDraft.id}`, {
+    version: countPosted.version,
+    lines: [{ productId: stockProduct.id, countedQuantity: 7 }],
+  });
+  const stockSummary = await request("GET", base + "/inventory/balances");
+  assert.equal(stockSummary.summary.value, 161);
+  assert.equal(stockSummary.summary.low, 1);
   const form = new FormData();
   form.append(
     "file",
@@ -349,6 +378,38 @@ try {
     ])
   ).trim();
   assert.equal(restoredPayment, "300:2026-01-05");
+  const restoredCount = (
+    await compose([
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "muchet",
+      "-d",
+      "restored",
+      "-At",
+      "-c",
+      `SELECT status || ':' || version::text || ':' || (data::jsonb->'lines'->0->'effect'->>'cost') FROM public.stock_counts WHERE id='${countDraft.id}'`,
+    ])
+  ).trim();
+  assert.equal(restoredCount, "POSTED:3:69");
+  const restoredStock = (
+    await compose([
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "muchet",
+      "-d",
+      "restored",
+      "-At",
+      "-c",
+      `SELECT sum(quantity)::text FROM public.batches WHERE product_id='${stockProduct.id}'`,
+    ])
+  ).trim();
+  assert.equal(restoredStock, "7");
   await compose(["exec", "-T", "api", "mkdir", "/app/data/restore-check"]);
   await compose(
     ["exec", "-T", "api", "tar", "-xzf", "-", "-C", "/app/data/restore-check"],
@@ -428,7 +489,7 @@ try {
   ).token;
   assert.ok(token);
   console.log(
-    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
+    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, stock balances and corrected counts, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
   );
 } catch (error) {
   try {

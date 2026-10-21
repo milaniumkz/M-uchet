@@ -1,3 +1,4 @@
+import 'stock_counts_view.dart';
 import 'debts_workspace.dart';
 import 'journal_editor.dart';
 export 'journal_editor.dart' show JournalEditor;
@@ -186,7 +187,18 @@ class _LedgerWorkspaceState extends State<LedgerWorkspace> {
       if (!mounted) {
         return;
       }
-      if (details['sourceDebtId'] != null &&
+      if (details['sourceStockCountId'] != null &&
+          hasCompanyPermission(context, 'inventory.read')) {
+        await showStockCount(
+          context,
+          api: widget.api,
+          companyId: widget.companyId,
+          countId: details['sourceStockCountId'] as String,
+          currency: widget.currency,
+          projects: widget.projects,
+          onChanged: widget.onChanged,
+        );
+      } else if (details['sourceDebtId'] != null &&
           hasCompanyPermission(context, 'debts.read')) {
         await showOpeningDebt(
           context,

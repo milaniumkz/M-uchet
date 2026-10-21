@@ -63,6 +63,11 @@ export function registerSearchRoutes(app, { db, auth }) {
         "SELECT id,COALESCE(data->'counterparty'->>'name',id) AS title,'DEBT' AS kind,business_date::text AS detail FROM debts WHERE company_id=? AND (data->'counterparty'->>'name' ILIKE ? OR data->>'notes' ILIKE ? OR id=?) ORDER BY business_date DESC,id LIMIT ?",
         [pattern, pattern, q],
       );
+      await add(
+        ["inventory.read"],
+        "SELECT id,data::jsonb->>'reason' AS title,'STOCK_COUNT' AS kind,business_date::text AS detail FROM stock_counts WHERE company_id=? AND (data::jsonb->>'reason' ILIKE ? OR id=?) ORDER BY business_date DESC,id LIMIT ?",
+        [pattern,q],
+      );
       const all = groups.flat(),
         lower = q.toLocaleLowerCase("ru");
       all.sort(

@@ -1,3 +1,4 @@
+import 'workspace/stock_counts_view.dart';
 import 'workspace/home_workspace.dart';
 import 'workspace/commercial_editor.dart';
 import 'workspace/goods_editor.dart';
@@ -1003,6 +1004,18 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
       });
       return;
     }
+    if (kind == 'STOCK_COUNT') {
+      await showStockCount(
+        navigator.currentContext!,
+        api: api,
+        companyId: selectedCompany.id,
+        countId: id,
+        currency: selectedCompany.currency,
+        projects: projects,
+        onChanged: refresh,
+      );
+      return;
+    }
     if (kind == 'DEBT') {
       await showOpeningDebt(
         navigator.currentContext!,
@@ -1488,6 +1501,114 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
       ),
     ],
   );
+  bool get hasProjectFilter => const [
+    'sales',
+    'purchases',
+    'goods',
+    'employees',
+    'debts',
+    'payroll',
+    'reports',
+    'journal',
+  ].contains(section);
+  Widget compactWorkspaceHeader() => SafeArea(
+    bottom: false,
+    child: Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Разделы',
+                onPressed: busy ? null : homeMore,
+                icon: const Icon(Icons.menu),
+              ),
+              Expanded(
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: company!.id,
+                    isExpanded: true,
+                    items: companies
+                        .map(
+                          (c) => DropdownMenuItem(
+                            value: c.id,
+                            child: Text(
+                              c.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: busy
+                        ? null
+                        : (id) => perform(() async {
+                            company = companies.firstWhere((c) => c.id == id);
+                            selected = null;
+                            await refresh();
+                          }),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Поиск по фирме',
+                onPressed: busy ? null : companySearch,
+                icon: const Icon(Icons.search),
+              ),
+              IconButton(
+                tooltip: 'Обновить доступ и данные',
+                onPressed: busy ? null : () => perform(refreshAccess),
+                icon: const Icon(Icons.refresh),
+              ),
+              IconButton(
+                tooltip: 'Мой аккаунт',
+                onPressed: busy ? null : account,
+                icon: const Icon(Icons.person_outline),
+              ),
+            ],
+          ),
+          if (hasProjectFilter)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: selected ?? 'all',
+                  isExpanded: true,
+                  items: [
+                    const DropdownMenuItem(
+                      value: 'all',
+                      child: Text('Вся фирма'),
+                    ),
+                    const DropdownMenuItem(
+                      value: 'unassigned',
+                      child: Text('Общие операции'),
+                    ),
+                    ...projects.map(
+                      (p) => DropdownMenuItem(
+                        value: p['id'] as String,
+                        child: Text(
+                          p['name'] as String,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: busy
+                      ? null
+                      : (id) => perform(() async {
+                          selected = id == 'all' ? null : id;
+                          await refresh();
+                        }),
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
   Widget workspace() {
     if (!visible(section)) {
       return noPermissionsView();
@@ -1557,127 +1678,130 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
           Expanded(
             child: Column(
               children: [
-                Container(
-                  width: double.infinity,
-                  color: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 33,
-                    vertical: 16,
-                  ),
-                  child: Wrap(
-                    spacing: 20,
-                    runSpacing: 12,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (size.maxWidth < 1000)
-                        SizedBox(width: 200, child: sectionPicker()),
-                      SizedBox(
-                        width: 250,
-                        child: DropdownButton<String>(
-                          value: company!.id,
-                          isExpanded: true,
-                          items: companies
-                              .map(
-                                (c) => DropdownMenuItem(
-                                  value: c.id,
-                                  child: Text(
-                                    c.name,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: busy
-                              ? null
-                              : (id) => perform(() async {
-                                  company = companies.firstWhere(
-                                    (c) => c.id == id,
-                                  );
-                                  selected = null;
-                                  await refresh();
-                                }),
-                        ),
-                      ),
-                      if ([
-                        'sales',
-                        'purchases',
-                        'goods',
-                        'employees',
-                        'debts',
-                        'payroll',
-                        'reports',
-                        'journal',
-                      ].contains(section))
+                if (size.maxWidth < 600)
+                  compactWorkspaceHeader()
+                else
+                  Container(
+                    width: double.infinity,
+                    color: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 33,
+                      vertical: 16,
+                    ),
+                    child: Wrap(
+                      spacing: 20,
+                      runSpacing: 12,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (size.maxWidth < 1000)
+                          SizedBox(width: 200, child: sectionPicker()),
                         SizedBox(
-                          width: 240,
+                          width: 250,
                           child: DropdownButton<String>(
-                            value: selected ?? 'all',
+                            value: company!.id,
                             isExpanded: true,
-                            items: [
-                              const DropdownMenuItem(
-                                value: 'all',
-                                child: Text('Вся фирма'),
-                              ),
-                              const DropdownMenuItem(
-                                value: 'unassigned',
-                                child: Text('Общие операции'),
-                              ),
-                              ...projects.map(
-                                (p) => DropdownMenuItem(
-                                  value: p['id'] as String,
-                                  child: Text(
-                                    p['name'] as String,
-                                    overflow: TextOverflow.ellipsis,
+                            items: companies
+                                .map(
+                                  (c) => DropdownMenuItem(
+                                    value: c.id,
+                                    child: Text(
+                                      c.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ],
+                                )
+                                .toList(),
                             onChanged: busy
                                 ? null
                                 : (id) => perform(() async {
-                                    selected = id == 'all' ? null : id;
+                                    company = companies.firstWhere(
+                                      (c) => c.id == id,
+                                    );
+                                    selected = null;
                                     await refresh();
                                   }),
                           ),
                         ),
-                      searchButton(),
-                      IconButton(
-                        tooltip: 'Обновить доступ и данные',
-                        onPressed: busy ? null : () => perform(refreshAccess),
-                        icon: const Icon(Icons.refresh),
-                      ),
-                      if ([
-                        'sales',
-                        'purchases',
-                        'goods',
-                        'reports',
-                        'journal',
-                      ].contains(section))
-                        TextButton.icon(
-                          onPressed: busy ? null : choosePeriod,
-                          icon: const Icon(Icons.date_range),
-                          label: Text(
-                            period == null
-                                ? 'За всё время'
-                                : '${date(period!.start)} — ${date(period!.end)}',
+                        if ([
+                          'sales',
+                          'purchases',
+                          'goods',
+                          'employees',
+                          'debts',
+                          'payroll',
+                          'reports',
+                          'journal',
+                        ].contains(section))
+                          SizedBox(
+                            width: 240,
+                            child: DropdownButton<String>(
+                              value: selected ?? 'all',
+                              isExpanded: true,
+                              items: [
+                                const DropdownMenuItem(
+                                  value: 'all',
+                                  child: Text('Вся фирма'),
+                                ),
+                                const DropdownMenuItem(
+                                  value: 'unassigned',
+                                  child: Text('Общие операции'),
+                                ),
+                                ...projects.map(
+                                  (p) => DropdownMenuItem(
+                                    value: p['id'] as String,
+                                    child: Text(
+                                      p['name'] as String,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              onChanged: busy
+                                  ? null
+                                  : (id) => perform(() async {
+                                      selected = id == 'all' ? null : id;
+                                      await refresh();
+                                    }),
+                            ),
                           ),
-                        ),
-                      IconButton(
-                        tooltip: 'Мой аккаунт',
-                        onPressed: busy ? null : account,
-                        icon: const Icon(Icons.person_outline),
-                      ),
-                      if (size.maxWidth < 1000)
+                        searchButton(),
                         IconButton(
-                          tooltip: 'Фирма',
-                          onPressed: busy || !can('organization.read')
-                              ? null
-                              : companySettings,
-                          icon: const Icon(Icons.business_outlined),
+                          tooltip: 'Обновить доступ и данные',
+                          onPressed: busy ? null : () => perform(refreshAccess),
+                          icon: const Icon(Icons.refresh),
                         ),
-                    ],
+                        if ([
+                          'sales',
+                          'purchases',
+                          'goods',
+                          'reports',
+                          'journal',
+                        ].contains(section))
+                          TextButton.icon(
+                            onPressed: busy ? null : choosePeriod,
+                            icon: const Icon(Icons.date_range),
+                            label: Text(
+                              period == null
+                                  ? 'За всё время'
+                                  : '${date(period!.start)} — ${date(period!.end)}',
+                            ),
+                          ),
+                        IconButton(
+                          tooltip: 'Мой аккаунт',
+                          onPressed: busy ? null : account,
+                          icon: const Icon(Icons.person_outline),
+                        ),
+                        if (size.maxWidth < 1000)
+                          IconButton(
+                            tooltip: 'Фирма',
+                            onPressed: busy || !can('organization.read')
+                                ? null
+                                : companySettings,
+                            icon: const Icon(Icons.business_outlined),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
                 if (busy) const LinearProgressIndicator(),
                 if (error != null)
                   Text(error!, style: const TextStyle(color: Colors.red)),

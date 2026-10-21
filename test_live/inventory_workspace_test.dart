@@ -80,6 +80,7 @@ void main() {
         await tester.pumpAndSettle();
       }
 
+      await click(find.text('Партии'));
       await click(find.text('Поступление'));
       await tester.enterText(
         find.widgetWithText(TextField, 'Количество базовых единиц'),
@@ -131,6 +132,18 @@ void main() {
         );
         expect(pl['expenses'], 1000);
       });
+      await click(find.text('Остатки'));
+      expect(find.text('Стоимость остатков'), findsOneWidget);
+      expect(find.text('40,00 ₸'), findsOneWidget);
+      expect(find.text('Экспорт CSV'), findsOneWidget);
+      await click(find.text('Движения'));
+      expect(find.textContaining('Поступление · SYNTHETIC PRODUCT'), findsOneWidget);
+      expect(find.textContaining('Перемещение · SYNTHETIC PRODUCT'), findsOneWidget);
+      expect(find.textContaining('Списание · SYNTHETIC PRODUCT'), findsOneWidget);
+      await click(find.byTooltip('Подробности движения').first);
+      expect(find.text('Складская операция'), findsOneWidget);
+      await click(find.text('Закрыть'));
+      await click(find.text('Остатки'));
       expect(tester.takeException(), isNull);
       await tester.binding.setSurfaceSize(const Size(390, 844));
       tester.view.physicalSize = const Size(390, 844);

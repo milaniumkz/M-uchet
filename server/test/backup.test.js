@@ -79,6 +79,9 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  await request('POST',prefix+`/payroll/${payroll.id}/payments/${salaryPayment.id}/void`,{version:1},session.token,key());await request('POST',prefix+`/payroll/${payroll.id}/payments/${salaryPayment.id}/restore`,{version:2},session.token,key());
  const taxTask=await request('POST',prefix+'/tax-calendar',{title:'SYNTHETIC RESTORE TASK',dueDate:'2026-01-26',status:'OPEN',category:'TAX',dueDateConfirmed:true,source:'SYNTHETIC CHECKED SOURCE'},session.token,key());
  await request('PUT',prefix+'/tax-calendar/preparation/2026-01',{version:0,settingsVersion:1,profileChecked:true,documentsChecked:true,controlsChecked:false},session.token,key());
+ const stockCount=await request('POST',prefix+'/inventory/counts',{warehouseId:warehouse.id,businessDate:'2026-01-31',reason:'SYNTHETIC RESTORED COUNT',lines:[{productId:product.id,countedQuantity:2}]},session.token,key());
+ const stockPosted=await request('POST',prefix+`/inventory/counts/${stockCount.id}/post`,{version:stockCount.version},session.token,key());
+ await request('PUT',prefix+`/inventory/counts/${stockCount.id}`,{version:stockPosted.version,lines:[{productId:product.id,countedQuantity:1}]},session.token,key());
  await app.close();app=undefined;
  const dump=await open(join(directory,'backup.dump'),'wx',0o600);
  try{await docker(['pg_dump','-U','muchet','-d','muchet',`--schema=${schema}`,'--format=custom','--no-owner','--no-acl'],'ignore',dump.fd);}finally{await dump.close();}
@@ -108,6 +111,9 @@ test('real PostgreSQL dump/restore retains users, exact journal and private file
  const combined=combinedResponse.json();assert.equal(combined.accounts.find(a=>a.account==='receivables').closing,12393);assert.equal(combined.accounts.find(a=>a.account==='customer_advances').closing,-100);assert.ok(combined.items.some(r=>r.source_kind==='GOODS'));assert.ok(combined.items.some(r=>r.source_kind==='DEBT'));assert.ok(combined.items.some(r=>r.source_kind==='SERVICE'));
  const supplierStatement=(await restored.inject({url:prefix+`/counterparties/suppliers/${supplier.id}/statement`,headers})).json();assert.equal(supplierStatement.accounts.find(a=>a.account==='payables').closing,-4321);
  const dashboardResponse=await restored.inject({url:prefix+'/dashboard',headers});assert.equal(dashboardResponse.statusCode,200);const dashboard=dashboardResponse.json();assert.equal(dashboard.money.cash,222458473);assert.equal(dashboard.chart.at(-1).closing,dashboard.money.cash);assert.equal(dashboard.chartBasis,'MONTH_END_CASH_BALANCE');
+ const countCopy=(await restored.inject({url:prefix+`/inventory/counts/${stockCount.id}`,headers})).json();assert.equal(countCopy.status,'POSTED');assert.equal(countCopy.version,3);assert.equal(countCopy.data.lines[0].effect.cost,110);
+ const stockCopy=(await restored.inject({url:prefix+'/inventory/balances',headers})).json();assert.equal(stockCopy.summary.value,55);assert.equal(stockCopy.items[0].quantity,1);
+ const countHistory=(await restored.inject({url:prefix+`/inventory/counts/${stockCount.id}/history`,headers})).json();assert.equal(countHistory.items.length,2);
  const shifts=(await restored.inject({url:prefix+'/shifts',headers})).json().items;assert.equal(shifts.find(s=>s.id===shift.id).difference,-1);
  const invitations=(await restored.inject({url:prefix+'/invitations',headers})).json().items;assert.ok(invitations.some(i=>i.id===invitation.id));
  const salaryCopy=(await restored.inject({url:prefix+`/payroll/${payroll.id}`,headers})).json();assert.equal(salaryCopy.data.calculation.net,17137500);assert.equal(salaryCopy.paid,1000000);assert.equal(salaryCopy.data.ruleSnapshot.version,'KZ_REGULAR_RESIDENT_PAYROLL_2026_V1');

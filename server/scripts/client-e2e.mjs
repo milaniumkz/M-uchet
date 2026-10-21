@@ -28,6 +28,7 @@ const available = [
   "test_live/company_search_test.dart",
   "test_live/debts_workspace_test.dart",
   "test_live/home_workspace_test.dart",
+  "test_live/stock_counts_workspace_test.dart",
 ];
 const requested = process.argv.slice(2);
 if (requested.some((file) => !available.includes(file)))

@@ -258,11 +258,12 @@ class _ResourceEditorState extends State<_ResourceEditor> {
   late final data = <String, dynamic>{...?widget.previous?.data};
   bool busy = false, uncertain = false;
   String? error;
-  String price = '0.00';
+  String price = '0.00', minimumStock = '';
   RetriableCommand? pending;
   @override
   void initState() {
     super.initState();
+    minimumStock = data['minimumStock']?.toString() ?? '';
     if (data['priceMinor'] is int) {
       price = ((data['priceMinor'] as int) / 100).toStringAsFixed(2);
     }
@@ -290,6 +291,19 @@ class _ResourceEditorState extends State<_ResourceEditor> {
       }
       if (['services', 'nomenklatura'].contains(widget.kind)) {
         data['priceMinor'] = parseMoney(price);
+      }
+      if (widget.kind == 'nomenklatura') {
+        if (minimumStock.trim().isEmpty) {
+          data.remove('minimumStock');
+        } else {
+          final units = int.tryParse(minimumStock.trim());
+          if (units == null || units < 0 || units > 1000000000000) {
+            throw const FormatException(
+              'Введите целый неотрицательный минимум в базовых единицах.',
+            );
+          }
+          data['minimumStock'] = units;
+        }
       }
       if (['clients', 'suppliers'].contains(widget.kind)) {
         final id = data['identifier'] as String? ?? '';
@@ -384,6 +398,25 @@ class _ResourceEditorState extends State<_ResourceEditor> {
                 onChanged: (v) => price = v,
               ),
             ],
+            if (widget.kind == 'nomenklatura')
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: TextFormField(
+                  initialValue: minimumStock,
+                  enabled:
+                      !busy &&
+                      !uncertain &&
+                      hasCompanyPermission(context, 'catalog.write'),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Минимальный доступный остаток на складе',
+                    helperMaxLines: 3,
+                    helperText:
+                        'Целые базовые единицы; пусто — минимум не задан. Применяется к каждому складу.',
+                  ),
+                  onChanged: (v) => minimumStock = v,
+                ),
+              ),
             if (error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 16),

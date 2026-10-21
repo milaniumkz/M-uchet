@@ -15,6 +15,7 @@ for (const account of accountReference("2026-01-01").accounts) {
     categories.set(account.code, account.code === "7010" ? "cogs" : "expenses");
 }
 categories.set("revenue", "revenue");
+categories.set("inventory_surplus", "otherIncome");
 categories.set("cogs", "cogs");
 for (const account of [
   "expenses",

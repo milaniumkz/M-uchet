@@ -11,6 +11,117 @@ import { transaction } from '../src/db.js';
 import { accountReference } from '../src/legal.js';
 
 const testSchema = () => 'test_' + randomUUID().replaceAll('-', '');
+test('editing one line in a mixed count retains consumed surplus and unrelated FIFO losses',async t=>{
+ const f=await fixture(t),r=await f.catalog(),extra=(await f.api('POST','/resources/nomenklatura',{data:{name:'SYNTHETIC MIXED COUNT'}})).body;
+ await f.api('POST','/inventory/receipts',{productId:extra.id,warehouseId:r.warehouseId,quantity:5,unitCost:30});
+ let count=(await f.api('POST','/inventory/counts',{warehouseId:r.warehouseId,reason:'SYNTHETIC MIXED',valuationConfirmed:true,lines:[{productId:r.productId,countedQuantity:2,surplusUnitCost:20},{productId:extra.id,countedQuantity:4}]})).body;
+ count=(await f.api('POST',`/inventory/counts/${count.id}/post`,{version:count.version})).body;
+ const order=(await f.api('POST','/orders',{items:[{...r,quantity:1,unitPrice:100}]})).body;await f.api('POST',`/orders/${order.id}/reserve`,{});await f.api('POST',`/orders/${order.id}/ship`,{});
+ const result=await f.api('PUT',`/inventory/counts/${count.id}`,{version:count.version,lines:[{productId:extra.id,countedQuantity:4,surplusUnitCost:999},{productId:r.productId,countedQuantity:3,surplusUnitCost:20}]});assert.equal(result.status,200);
+ const pl=(await f.api('GET','/reports/profit-loss')).body;assert.equal(pl.expenses,30);assert.equal(pl.otherIncome,60);assert.equal(pl.cogs,20);
+ const balance=(await f.api('GET','/inventory/balances')).body;assert.equal(balance.items.find(b=>b.product_id===r.productId).quantity,2);assert.equal(balance.items.find(b=>b.product_id===extra.id).quantity,4);
+});
+test('reordering a multi-item surplus after consumption preserves stock layers and their costs',async t=>{
+ const f=await fixture(t),r=await f.catalog(),second=(await f.api('POST','/resources/nomenklatura',{data:{name:'SYNTHETIC SECOND COUNT ITEM'}})).body;
+ let count=(await f.api('POST','/inventory/counts',{warehouseId:r.warehouseId,reason:'SYNTHETIC TWO ITEMS',valuationConfirmed:true,lines:[{productId:r.productId,countedQuantity:2,surplusUnitCost:20},{productId:second.id,countedQuantity:2,surplusUnitCost:30}]})).body;
+ count=(await f.api('POST',`/inventory/counts/${count.id}/post`,{version:count.version})).body;
+ const order=(await f.api('POST','/orders',{items:[{...r,quantity:1,unitPrice:100}]})).body;await f.api('POST',`/orders/${order.id}/reserve`,{});await f.api('POST',`/orders/${order.id}/ship`,{});
+ const batchIds=(await f.api('GET','/inventory')).body.items.map(b=>b.id).sort();
+ const result=await f.api('PUT',`/inventory/counts/${count.id}`,{version:count.version,lines:[...count.data.lines].reverse()});assert.equal(result.status,200);
+ assert.deepEqual((await f.api('GET','/inventory')).body.items.map(b=>b.id).sort(),batchIds);assert.equal((await f.api('GET','/reports/profit-loss')).body.otherIncome,100);
+});
+test('stock count posting rolls back every line when a later reserved item cannot be written off',async t=>{
+ const f=await fixture(t),r=await f.catalog(),extra=(await f.api('POST','/resources/nomenklatura',{data:{name:'SYNTHETIC SURPLUS LINE'}})).body;
+ await f.api('POST','/inventory/receipts',{...r,quantity:1,unitCost:1});
+ const order=(await f.api('POST','/orders',{items:[{...r,quantity:1,unitPrice:1}]})).body;await f.api('POST',`/orders/${order.id}/reserve`,{});
+ const c=(await f.api('POST','/inventory/counts',{warehouseId:r.warehouseId,reason:'SYNTHETIC ATOMIC COUNT',valuationConfirmed:true,lines:[{productId:extra.id,countedQuantity:2,surplusUnitCost:20},{productId:r.productId,countedQuantity:0}]})).body;
+ const result=await f.api('POST',`/inventory/counts/${c.id}/post`,{version:c.version});assert.equal(result.status,409);assert.equal(result.body.error,'insufficient_inventory');
+ const after=(await f.api('GET',`/inventory/counts/${c.id}`)).body;assert.equal(after.status,'DRAFT');assert.equal(after.version,c.version);
+ const balances=(await f.api('GET','/inventory/balances')).body;assert.equal(balances.items.length,1);assert.equal(balances.items[0].quantity,1);assert.equal((await f.api('GET','/reports/profit-loss')).body.otherIncome,0);
+ assert.equal((await f.app.db.prepare('SELECT count(*) AS n FROM stock_count_postings WHERE company_id=? AND count_id=?').get(f.company.id,c.id)).n,0);
+});
+test('warehouse quantity overflow is rejected as a report error before unsafe JSON or CSV',async t=>{
+ const f=await fixture(t),r=await f.catalog();
+ await f.app.db.prepare("INSERT INTO batches(id,company_id,product_id,warehouse_id,scope,quantity,reserved,unit_cost,created_at) SELECT 'overflow-'||n,?,?,?,'ACCOUNTING',1000000000000,0,0,'2026-01-01' FROM generate_series(1,10000) n").run(f.company.id,r.productId,r.warehouseId);
+ for(const suffix of ['', '?export=csv']){const result=await f.api('GET','/inventory/balances'+suffix);assert.equal(result.status,422);assert.equal(result.body.error,'report_amount_overflow');}
+});
+test('stock counts detect changed reservations, post exact FIFO loss and support audited corrections',async t=>{
+ const f=await fixture(t),r=await f.catalog();await f.api('POST','/inventory/receipts',{...r,quantity:5,unitCost:10});
+ const body={warehouseId:r.warehouseId,reason:'SYNTHETIC PHYSICAL COUNT',businessDate:'2026-01-01',lines:[{productId:r.productId,countedQuantity:2}]};
+ let count=(await f.api('POST','/inventory/counts',body)).body;assert.equal(count.status,'DRAFT');assert.equal(count.data.lines[0].expectedQuantity,5);
+ const order=(await f.api('POST','/orders',{items:[{...r,quantity:1,unitPrice:100}]})).body;await f.api('POST',`/orders/${order.id}/reserve`,{});
+ const stale=await f.api('POST',`/inventory/counts/${count.id}/post`,{version:count.version});assert.equal(stale.status,409);assert.equal(stale.body.error,'stock_count_stale');
+ count=(await f.api('PUT',`/inventory/counts/${count.id}`,{...body,version:count.version,rebase:true})).body;
+ const key=randomUUID(),posted=await f.api('POST',`/inventory/counts/${count.id}/post`,{version:count.version},key);assert.equal(posted.status,200);count=posted.body;
+ assert.equal((await f.api('POST',`/inventory/counts/${count.id}/post`,{version:count.version-1},key)).body.version,count.version);
+ assert.equal((await f.api('GET','/inventory/balances')).body.items[0].quantity,2);assert.equal((await f.api('GET','/reports/profit-loss')).body.expenses,30);
+ assert.equal((await f.api('PUT',`/inventory/counts/${count.id}`,{...body,version:1})).status,409);
+ count=(await f.api('PUT',`/inventory/counts/${count.id}`,{...body,businessDate:'1999-12-31',version:count.version,lines:[{productId:r.productId,countedQuantity:4}]})).body;
+ assert.equal(count.status,'POSTED');assert.equal(count.business_date,'1999-12-31');assert.equal((await f.api('GET','/inventory/balances')).body.items[0].quantity,4);assert.equal((await f.api('GET','/reports/profit-loss')).body.expenses,10);
+ const posting=(await f.app.db.prepare('SELECT journal_id FROM stock_count_postings WHERE company_id=? AND count_id=? AND active').get(f.company.id,count.id)).journal_id;
+ assert.equal((await f.api('GET',`/accounting/journal/${posting}`)).body.sourceStockCountId,count.id);
+ assert.ok((await f.api('GET','/search?q=SYNTHETIC%20PHYSICAL%20COUNT')).body.items.some(r=>r.kind==='STOCK_COUNT'&&r.id===count.id));
+ assert.equal((await f.api('PUT',`/accounting/journal/${posting}`,{description:'Manual: renamed count'})).status,200);
+ assert.equal((await f.api('POST',`/accounting/journal/${posting}/reverse`,{reason:'BYPASS'})).body.error,'source_document_edit_required');
+ assert.equal((await f.api('PUT',`/accounting/journal/${posting}`,{lines:[{account:'inventory_loss',debit:1},{account:'inventory',credit:1}]})).body.error,'source_document_edit_required');
+ count=(await f.api('POST',`/inventory/counts/${count.id}/cancel`,{version:count.version})).body;
+ assert.equal(count.status,'CANCELLED');assert.equal((await f.api('GET','/inventory/balances')).body.items[0].quantity,5);assert.equal((await f.api('GET','/reports/profit-loss')).body.expenses,0);
+ assert.ok((await f.api('GET',`/inventory/counts/${count.id}/history`)).body.items.length>=4);
+ const member=await f.user('stock-count-reader@example.test');await f.api('PUT',`/members/${member.id}`,{permissions:['inventory.read']});
+ assert.equal((await f.call('GET',f.prefix+`/inventory/counts/${count.id}`,undefined,member.token)).status,200);assert.equal((await f.call('POST',f.prefix+'/inventory/counts',body,member.token,randomUUID())).status,403);
+});
+test('confirmed stock count surplus remains editable after sale without inventing cash or duplicate profit',async t=>{
+ const f=await fixture(t),r=await f.catalog();
+ const body={warehouseId:r.warehouseId,reason:'SYNTHETIC SURPLUS',lines:[{productId:r.productId,countedQuantity:2,surplusUnitCost:20}]};
+ let c=(await f.api('POST','/inventory/counts',body)).body;
+ assert.equal((await f.api('POST',`/inventory/counts/${c.id}/post`,{version:c.version})).body.error,'stock_count_valuation_confirmation_required');
+ c=(await f.api('PUT',`/inventory/counts/${c.id}`,{...body,version:c.version,valuationConfirmed:true})).body;
+ c=(await f.api('POST',`/inventory/counts/${c.id}/post`,{version:c.version})).body;
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.otherIncome,40);
+ const order=(await f.api('POST','/orders',{items:[{...r,quantity:1,unitPrice:100}]})).body;await f.api('POST',`/orders/${order.id}/reserve`,{});await f.api('POST',`/orders/${order.id}/ship`,{});
+ assert.equal((await f.api('PUT',`/inventory/counts/${c.id}`,{version:c.version,valuationConfirmed:false})).body.error,'stock_count_valuation_confirmation_required');
+ const project=(await f.api('POST','/projects',{name:'SYNTHETIC COUNT PROJECT'})).body;
+ let result=await f.api('PUT',`/inventory/counts/${c.id}`,{...body,version:c.version,valuationConfirmed:true,businessDate:'1999-01-01',projectId:project.id});assert.equal(result.status,200);c=result.body;
+ result=await f.api('PUT',`/inventory/counts/${c.id}`,{version:c.version,lines:[{productId:r.productId,countedQuantity:3,surplusUnitCost:20}]});assert.equal(result.status,200);c=result.body;
+ assert.equal((await f.api('GET','/inventory/balances')).body.items[0].quantity,2);const pl=(await f.api('GET','/reports/profit-loss')).body;assert.equal(pl.otherIncome,60);assert.equal(pl.cogs,20);assert.equal(pl.salesRevenue,100);
+ result=await f.api('POST',`/inventory/counts/${c.id}/cancel`,{version:c.version});assert.equal(result.status,409);assert.equal(result.body.error,'stock_count_surplus_in_use');assert.equal((await f.api('GET',`/inventory/counts/${c.id}`)).body.version,c.version);
+});
+test('warehouse balances aggregate FIFO layers, reservations, zero stock and whole-filter CSV',async t=>{
+ const f=await fixture(t), stock=await f.catalog();
+ const second=(await f.api('POST','/resources/warehouses',{data:{name:'Second'}})).body;
+ const empty=(await f.api('POST','/resources/nomenklatura',{data:{name:'  =EMPTY; "товар"',unit:'шт.',minimumStock:1}})).body;
+ assert.equal((await f.api('PUT','/resources/nomenklatura/'+stock.productId,{version:1,data:{name:'Product',minimumStock:3}})).status,200);
+ assert.equal((await f.api('POST','/resources/nomenklatura',{data:{name:'INVALID MINIMUM',minimumStock:'3'}})).status,400);
+ for(const [quantity,unitCost]of [[2,101],[3,203]])assert.equal((await f.api('POST','/inventory/receipts',{...stock,quantity,unitCost})).status,200);
+ const order=(await f.api('POST','/orders',{items:[{...stock,quantity:3,unitPrice:500}]})).body;
+ assert.equal((await f.api('POST',`/orders/${order.id}/reserve`,{})).status,200);
+ let result=await f.api('GET','/inventory/balances?limit=1&warehouseId='+stock.warehouseId);
+ assert.equal(result.status,200);assert.equal(result.body.items.length,1);assert.equal(result.body.summary.positions,2);assert.equal(result.body.summary.value,811);assert.equal(result.body.summary.low,2);assert.equal(result.body.summary.configured_minimums,2);
+ const exportResult=(await f.api('GET','/inventory/balances?limit=1&export=csv&warehouseId='+stock.warehouseId)).body;
+ assert.equal(exportResult.rowCount,2);assert.ok(exportResult.csv.includes(`'  =EMPTY; ""товар""`));
+ const balance=(await f.api('GET','/inventory/balances?productId='+stock.productId)).body.items[0];
+ assert.equal(balance.quantity,5);assert.equal(balance.reserved,3);assert.equal(balance.available,2);assert.equal(balance.value,811);assert.equal(balance.available_value,406);
+ assert.equal((await f.api('GET','/inventory/balances?warehouseId='+stock.warehouseId+'&availability=EMPTY')).body.items[0].product_id,empty.id);
+ assert.equal((await f.api('GET','/inventory/balances?warehouseId='+stock.warehouseId+'&availability=LOW')).body.items.length,2);
+ const page2=await f.api('GET','/inventory/balances?warehouseId='+stock.warehouseId+'&after='+encodeURIComponent(result.body.nextCursor));assert.equal(page2.body.items.length,1);
+ assert.equal((await f.api('POST','/inventory/movements',{...stock,sourceWarehouseId:stock.warehouseId,targetWarehouseId:second.id,quantity:1})).status,200);
+ assert.equal((await f.api('POST','/inventory/writeoffs',{...stock,quantity:1,reason:'SYNTHETIC'})).status,200);
+ result=await f.api('GET','/inventory/balances');assert.equal(result.body.summary.value,608);assert.equal(result.body.summary.products,1);assert.equal(result.body.summary.positions,2);
+ assert.equal((await f.api('GET','/inventory/balances?availability=RESERVED')).body.items[0].available,0);
+ assert.equal((await f.api('GET','/inventory/balances?q='+encodeURIComponent('%'))).body.summary.positions,0);
+ assert.equal((await f.api('GET','/inventory/balances?scope=MANAGEMENT')).body.summary.positions,0);
+ assert.equal((await f.api('GET','/inventory/balances?scope=invalid')).status,400);
+ assert.equal((await f.api('GET','/inventory/balances?availability=invalid')).status,400);
+ const history=(await f.api('GET','/inventory/operations?limit=1')).body;assert.equal(history.items.length,1);assert.ok(history.nextCursor);assert.equal(history.coverage,'RECORDED_OPERATIONS_ONLY');
+ const older=(await f.api('GET','/inventory/operations?after='+history.nextCursor)).body.items;assert.equal(older.length,3);assert.ok(older.every(m=>m.id!==history.items[0].id));
+ assert.equal((await f.api('GET','/inventory/operations?type=RECEIPT')).body.items.length,2);
+ const receipts=(await f.api('GET','/inventory/operations?type=RECEIPT')).body.items;assert.ok(receipts.every(m=>m.data.journalId&&m.data.businessDate));
+ assert.equal((await f.api('GET','/inventory/operations?after=other-company')).status,400);
+ assert.equal((await f.api('POST','/inventory/receipts',{...stock,quantity:1,unitCost:0,businessDate:'2026-02-30'})).status,400);
+ assert.equal((await f.api('POST','/inventory/writeoffs',{...stock,quantity:1,businessDate:'bad',reason:'INVALID'})).status,400);
+ const outsider=await f.user('stock-outsider@example.test');assert.equal((await f.call('GET',f.prefix+'/inventory/balances',undefined,outsider.token)).status,404);
+ await f.api('PUT',`/members/${outsider.id}`,{permissions:['catalog.read']});assert.equal((await f.call('GET',f.prefix+'/inventory/balances?export=csv',undefined,outsider.token)).status,403);
+});
 test('2026 account reference cannot silently apply the published future 2027 version',()=>{
  const chart=accountReference('2026-12-31');
  assert.equal(chart.accounts.find(a=>a.code==='1010').name,'Денежные средства в кассе');
@@ -223,7 +334,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 22);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 23);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {

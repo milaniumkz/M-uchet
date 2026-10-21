@@ -5,6 +5,7 @@ import '../backend/rest/api_client.dart';
 const searchKindLabels = {
   'PROJECT': 'Проект',
   'DEBT': 'Начальный долг',
+  'STOCK_COUNT': 'Инвентаризация',
   'SALE_INVOICE': 'Счёт на оплату',
   'SALE_ACT': 'Акт реализации',
   'PURCHASE_ACT': 'Поступление услуг',

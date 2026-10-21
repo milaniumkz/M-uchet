@@ -1,3 +1,5 @@
+import 'stock_counts_view.dart';
+import 'inventory_balances_view.dart';
 import 'company_access.dart';
 import 'package:flutter/material.dart';
 import '../backend/rest/api_client.dart';
@@ -27,6 +29,9 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
   List<Map<String, dynamic>> batches = [];
   String? error, cursor;
   bool busy = false;
+  String view = 'balances', stockScope = 'ACCOUNTING';
+  String? warehouseFilter, today;
+  int reportRevision = 0;
   @override
   void initState() {
     super.initState();
@@ -51,6 +56,7 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
   }
 
   Future<void> load({bool more = false}) async {
+    if (!mounted) return;
     setState(() => busy = true);
     try {
       if (!more) {
@@ -69,6 +75,8 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
           final next = (data['items'] as List).map(jsonObject).toList();
           batches = more ? [...batches, ...next] : next;
           cursor = data['nextCursor'] as String?;
+          reportRevision++;
+          today = data['businessDate'] as String?;
           error = null;
         });
       }
@@ -96,6 +104,9 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
         products: products,
         warehouses: warehouses,
         projects: widget.projects,
+        initialScope: stockScope,
+        initialWarehouseId: warehouseFilter,
+        initialBusinessDate: today,
       ),
     );
     if (result == true && mounted) {
@@ -110,18 +121,38 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
     }
   }
 
+  Future<void> startCount() async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => StockCountEditor(
+        api: widget.api,
+        companyId: widget.companyId,
+        currency: widget.currency,
+        products: products,
+        warehouses: warehouses,
+        projects: widget.projects,
+        scope: stockScope,
+        warehouseId: warehouseFilter,
+        today: today,
+      ),
+    );
+    if (!mounted) return;
+    setState(() => view = 'counts');
+    await widget.onChanged();
+    await load();
+  }
+
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(28),
+    padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 24 : 33),
     children: [
       const Text(
         'Складские остатки',
-        style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+        style: TextStyle(fontSize: 29, fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 16),
-      const Text(
-        'Партии и доступные остатки общие для фирмы. При отгрузке или списании себестоимость определяется сервером по FIFO. Количество задаётся целыми базовыми единицами товара.',
-      ),
+      const Text('Проверьте наличие и движения товаров.'),
       const SizedBox(height: 20),
       Wrap(
         spacing: 12,
@@ -158,6 +189,18 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                 : () => action('writeoff'),
             child: const Text('Списание'),
           ),
+          if (view != 'counts')
+            OutlinedButton.icon(
+              onPressed:
+                  busy ||
+                      products.isEmpty ||
+                      warehouses.isEmpty ||
+                      !hasCompanyPermission(context, 'inventory.count')
+                  ? null
+                  : startCount,
+              icon: const Icon(Icons.fact_check_outlined),
+              label: const Text('Начать инвентаризацию'),
+            ),
         ],
       ),
       if (products.isEmpty || warehouses.isEmpty)
@@ -171,48 +214,150 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
       if (busy) const LinearProgressIndicator(),
       if (error != null)
         Text(error!, style: const TextStyle(color: Colors.red)),
-      ...batches.map(
-        (b) => Card(
-          elevation: 0,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name(products, b['product_id']),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+      Wrap(
+        spacing: 16,
+        runSpacing: 12,
+        children: [
+          SizedBox(
+            width: 240,
+            child: DropdownButtonFormField<String>(
+              initialValue: stockScope,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Вид учёта остатков',
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: 'ACCOUNTING',
+                  child: Text('Бухгалтерский учёт'),
                 ),
-                Text('${name(warehouses, b['warehouse_id'])} · ${b['scope']}'),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 24,
-                  runSpacing: 8,
-                  children: [
-                    Text('Всего: ${b['quantity']}'),
-                    Text('Резерв: ${b['reserved']}'),
-                    Text(
-                      'Доступно: ${(b['quantity'] as num) - (b['reserved'] as num)}',
-                    ),
-                    Text(
-                      'Стоимость единицы: ${moneyText(b['unit_cost'] as num, widget.currency)}',
-                    ),
-                  ],
+                DropdownMenuItem(
+                  value: 'MANAGEMENT',
+                  child: Text('Управленческий учёт'),
                 ),
+                DropdownMenuItem(value: 'BOTH', child: Text('Оба вида учёта')),
               ],
+              onChanged: busy ? null : (v) => setState(() => stockScope = v!),
             ),
           ),
-        ),
+          SizedBox(
+            width: 260,
+            child: DropdownButtonFormField<String>(
+              initialValue: warehouseFilter ?? '',
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Отбор склада'),
+              items: [
+                const DropdownMenuItem(value: '', child: Text('Все склады')),
+                ...warehouses.map(
+                  (w) => DropdownMenuItem(
+                    value: w.id,
+                    child: Text(w.data['name'] as String),
+                  ),
+                ),
+              ],
+              onChanged: busy
+                  ? null
+                  : (v) => setState(() => warehouseFilter = v == '' ? null : v),
+            ),
+          ),
+        ],
       ),
-      if (batches.isEmpty && !busy)
+      const SizedBox(height: 20),
+      Wrap(
+        spacing: 12,
+        children: [
+          for (final entry in const {
+            'balances': 'Остатки',
+            'batches': 'Партии',
+            'operations': 'Движения',
+            'counts': 'Инвентаризации',
+          }.entries)
+            ChoiceChip(
+              label: Text(entry.value),
+              selected: view == entry.key,
+              onSelected: (_) => setState(() => view = entry.key),
+            ),
+        ],
+      ),
+      const SizedBox(height: 24),
+      if (view == 'counts')
+        StockCountsView(
+          api: widget.api,
+          companyId: widget.companyId,
+          currency: widget.currency,
+          products: products,
+          warehouses: warehouses,
+          projects: widget.projects,
+          scope: stockScope,
+          warehouseId: warehouseFilter,
+          today: today,
+          onChanged: () async {
+            await widget.onChanged();
+            await load();
+          },
+        ),
+      if (view == 'balances' || view == 'operations')
+        InventoryBalancesView(
+          api: widget.api,
+          companyId: widget.companyId,
+          currency: widget.currency,
+          scope: stockScope,
+          warehouseId: warehouseFilter,
+          revision: reportRevision,
+          operations: view == 'operations',
+        ),
+      if (view == 'batches')
+        ...batches
+            .where(
+              (b) =>
+                  b['scope'] == stockScope &&
+                  (warehouseFilter == null ||
+                      b['warehouse_id'] == warehouseFilter),
+            )
+            .map(
+              (b) => Card(
+                elevation: 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name(products, b['product_id']),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        '${name(warehouses, b['warehouse_id'])} · ${b['scope']}',
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 24,
+                        runSpacing: 8,
+                        children: [
+                          Text('Всего: ${b['quantity']}'),
+                          Text('Резерв: ${b['reserved']}'),
+                          Text(
+                            'Доступно: ${(b['quantity'] as num) - (b['reserved'] as num)}',
+                          ),
+                          Text(
+                            'Стоимость единицы: ${moneyText(b['unit_cost'] as num, widget.currency)}',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+      if (view == 'batches' && batches.isEmpty && !busy)
         const Padding(
           padding: EdgeInsets.all(24),
           child: Text('Товарных партий пока нет.'),
         ),
-      if (cursor != null)
+      if (view == 'batches' && cursor != null)
         TextButton(
           onPressed: busy ? null : () => load(more: true),
           child: const Text('Загрузить ещё'),
@@ -235,7 +380,12 @@ class InventoryCommandDialog extends StatefulWidget {
     required this.products,
     required this.warehouses,
     required this.projects,
+    this.initialScope = 'ACCOUNTING',
+    this.initialWarehouseId,
+    this.initialBusinessDate,
   });
+  final String initialScope;
+  final String? initialWarehouseId, initialBusinessDate;
   final BackendClient api;
   final String companyId, type;
   final List<ResourceDto> products, warehouses;
@@ -251,13 +401,19 @@ class _InventoryCommandDialogState extends State<InventoryCommandDialog> {
   RetriableCommand? pending;
   final quantity = TextEditingController(text: '1'),
       cost = TextEditingController(text: '0.00'),
-      reason = TextEditingController();
+      reason = TextEditingController(),
+      date = TextEditingController();
   @override
   void initState() {
     super.initState();
+    scope = widget.initialScope;
+    date.text = widget.initialBusinessDate ?? '';
     productId = widget.products.first.id;
-    warehouseId = widget.warehouses.first.id;
-    targetId = widget.warehouses.length > 1 ? widget.warehouses[1].id : null;
+    warehouseId = widget.initialWarehouseId ?? widget.warehouses.first.id;
+    targetId = widget.warehouses
+        .where((w) => w.id != warehouseId)
+        .firstOrNull
+        ?.id;
   }
 
   @override
@@ -265,6 +421,7 @@ class _InventoryCommandDialogState extends State<InventoryCommandDialog> {
     quantity.dispose();
     cost.dispose();
     reason.dispose();
+    date.dispose();
     super.dispose();
   }
 
@@ -294,6 +451,7 @@ class _InventoryCommandDialogState extends State<InventoryCommandDialog> {
           {
             'productId': productId,
             'quantity': units,
+            if (date.text.trim().isNotEmpty) 'businessDate': date.text.trim(),
             'scope': scope,
             'projectId': projectId,
             if (widget.type == 'transfer') ...{
@@ -385,6 +543,15 @@ class _InventoryCommandDialogState extends State<InventoryCommandDialog> {
                 ),
                 const SizedBox(height: 14),
               ],
+              TextField(
+                controller: date,
+                enabled: !busy && pending == null,
+                decoration: const InputDecoration(
+                  labelText: 'Дата операции',
+                  hintText: 'ГГГГ-ММ-ДД; пусто — сегодня по времени фирмы',
+                ),
+              ),
+              const SizedBox(height: 14),
               TextField(
                 controller: quantity,
                 enabled: !busy && pending == null,

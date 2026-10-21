@@ -1,3 +1,4 @@
+import { stockCountSource } from './stock-counts.js';
 import { debtSource } from './debts.js';
 import { profitBucket, accumulateProfit, profitResult } from './profit.js';
 import { projectOrderPayments } from './order-payments.js';
@@ -165,7 +166,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
   }));
 
   route('POST', '/inventory/movements', async request => (await command(request, 'inventory.move', 'inventory.move', async company => {
-    const body = object(request.body), ledgerScope = scope(body.scope);
+    const body = object(request.body), ledgerScope = scope(body.scope), date=businessDate(body.businessDate,company.timezone);
     const productId = text(body.productId, 'productId'), sourceId = text(body.sourceWarehouseId, 'sourceWarehouseId');
     const targetId = text(body.targetWarehouseId, 'targetWarehouseId'), quantity = integer(body.quantity, 'quantity', 1);
     if (sourceId === targetId) fail(400, 'same_warehouse');
@@ -180,12 +181,12 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
       cost += allocation.quantity * allocation.unitCost;
     }
     integer(cost, 'movement_cost');
-    const data = { id, productId, sourceWarehouseId: sourceId, targetWarehouseId: targetId, quantity, cost, scope: ledgerScope };
+    const data = { id, productId, sourceWarehouseId: sourceId, targetWarehouseId: targetId, quantity, cost, scope: ledgerScope,businessDate:date,allocations };
     (await db.prepare('INSERT INTO movements VALUES(?,?,?,?,?)').run(id, company.id, 'TRANSFER', JSON.stringify(data), now()));
     return data;
   })));
   route('POST', '/inventory/writeoffs', async request => (await command(request, 'inventory.writeoff', 'inventory.writeoff', async company => {
-    const body = object(request.body), ledgerScope = scope(body.scope), reason = text(body.reason, 'reason', 500);
+    const body = object(request.body), ledgerScope = scope(body.scope), reason = text(body.reason, 'reason', 500), date=businessDate(body.businessDate,company.timezone),projectId=await projectReference(db,company.id,body.projectId);
     const item = { productId: text(body.productId, 'productId'), warehouseId: text(body.warehouseId, 'warehouseId'), quantity: integer(body.quantity, 'quantity', 1) };
     const allocations = (await allocate(db, company.id, item, ledgerScope));
     const id = randomUUID(); let cost = 0;
@@ -194,8 +195,8 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
       cost += allocation.quantity * allocation.unitCost;
     }
     integer(cost, 'writeoff_cost');
-    (await journal(company, ledgerScope, `Writeoff ${id}: ${reason}`, 'inventory_loss', 'inventory', cost, body.projectId, body.businessDate));
-    const data = { id, ...item, reason, cost, scope: ledgerScope };
+    const posting=await journal(company, ledgerScope, `Writeoff ${id}: ${reason}`, 'inventory_loss', 'inventory', cost, projectId, date);
+    const data = { id, ...item, reason, cost, scope: ledgerScope,businessDate:date,projectId,journalId:posting?.id??null,allocations };
     (await db.prepare('INSERT INTO movements VALUES(?,?,?,?,?)').run(id, company.id, 'WRITEOFF', JSON.stringify(data), now()));
     return data;
   })));
@@ -274,7 +275,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if ((await db.prepare('SELECT 1 FROM journal_reversals WHERE original_id=? OR reversal_id=?').get(row.id, row.id))) fail(409, 'journal_already_reversed');
     // Reversing generated journal entries independently would desynchronize stock/wallets/orders.
     if (!row.description.startsWith('Manual: ')) fail(409, 'business_command_reversal_required');
-    if(await commercialSource(company.id,row.id)||await assetSource(company.id,row.id)||await orderSource(company.id,row.id)||await payrollSource(company.id,row.id)||await debtSource(db,company.id,row.id)||await transferSource(company.id,row.id))fail(409,'source_document_edit_required');
+    if(await commercialSource(company.id,row.id)||await assetSource(company.id,row.id)||await orderSource(company.id,row.id)||await payrollSource(company.id,row.id)||await debtSource(db,company.id,row.id)||await transferSource(company.id,row.id)||await stockCountSource(db,company.id,row.id))fail(409,'source_document_edit_required');
     const reason = text(object(request.body).reason, 'reason', 400);
     const result = (await postJournal(db, company, { scope: row.scope, projectId: row.project_id, description: `Reversal: ${reason}`, lines: JSON.parse(row.lines).map(line => ({ account: line.account, debit: line.credit, credit: line.debit })) }));
     await registerManualWalletEntries(db,company.id,result.id,result.lines,'JOURNAL_REVERSAL');
@@ -306,9 +307,9 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     const company=await access(request,'accounting.read');
     const row=await db.prepare('SELECT * FROM journal WHERE company_id=? AND id=?').get(company.id,request.params.id);
     if(!row)fail(404,'journal_not_found');
-    const debt=await debtSource(db,company.id,row.id),payroll=await payrollSource(company.id,row.id),order=await orderSource(company.id,row.id),source=await commercialSource(company.id,row.id),asset=await assetSource(company.id,row.id),transfer=await db.prepare("SELECT reference_id FROM wallet_entries WHERE company_id=? AND journal_id=? AND kind IN ('TRANSFER_IN','TRANSFER_OUT') LIMIT 1").get(company.id,row.id);
+    const stockCount=await stockCountSource(db,company.id,row.id),debt=await debtSource(db,company.id,row.id),payroll=await payrollSource(company.id,row.id),order=await orderSource(company.id,row.id),source=await commercialSource(company.id,row.id),asset=await assetSource(company.id,row.id),transfer=await db.prepare("SELECT reference_id FROM wallet_entries WHERE company_id=? AND journal_id=? AND kind IN ('TRANSFER_IN','TRANSFER_OUT') LIMIT 1").get(company.id,row.id);
     const revision=(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(row.id)).n;
-    return {...row,revision,lines:JSON.parse(row.lines),sourceDocumentId:source?.document_id??null,sourceOrderId:order?.order_id??null,sourcePayrollId:payroll?.payroll_id??null,sourceDebtId:debt?.debt_id??null,sourceAssetId:asset?.asset_id??null,sourceTransferId:transfer?.reference_id??null};
+    return {...row,revision,lines:JSON.parse(row.lines),sourceStockCountId:stockCount?.count_id??null,sourceDocumentId:source?.document_id??null,sourceOrderId:order?.order_id??null,sourcePayrollId:payroll?.payroll_id??null,sourceDebtId:debt?.debt_id??null,sourceAssetId:asset?.asset_id??null,sourceTransferId:transfer?.reference_id??null};
   });
   for (const [operation,status,permission] of [['close','CLOSED','periods.close'],['reopen','OPEN','periods.reopen']]) {
     route('POST', `/periods/:month/${operation}`, async request => command(request, permission, `period.${operation}`, async company => {
@@ -344,7 +345,7 @@ export function registerBusinessRoutes(app, { db, auth, access, command, pageLim
     if(body.expectedRevision!==undefined&&body.expectedRevision!==(await db.prepare('SELECT count(*) AS n FROM journal_history WHERE entry_id=?').get(old.id)).n)fail(409,'version_conflict');
     await db.prepare("SELECT set_config('app.edit_reason',?,true)").get(reason);
     const replacement={id:old.id,projectId:await projectReference(db,company.id,Object.hasOwn(body,'projectId')?body.projectId:old.project_id),scope:scope(body.scope??old.scope),description:text(body.description??old.description,'description',500),businessDate:businessDate(body.businessDate??old.business_date,company.timezone),lines:normalizeLines({lines:body.lines??JSON.parse(old.lines)})};
-    if((await commercialSource(company.id,old.id)||await assetSource(company.id,old.id)||await orderSource(company.id,old.id)||await payrollSource(company.id,old.id)||await debtSource(db,company.id,old.id)||await transferSource(company.id,old.id))&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
+    if((await commercialSource(company.id,old.id)||await assetSource(company.id,old.id)||await orderSource(company.id,old.id)||await payrollSource(company.id,old.id)||await debtSource(db,company.id,old.id)||await transferSource(company.id,old.id)||await stockCountSource(db,company.id,old.id))&&(replacement.scope!==old.scope||replacement.projectId!==old.project_id||replacement.businessDate!==old.business_date||JSON.stringify(replacement.lines)!==old.lines))fail(409,'source_document_edit_required');
     if([...JSON.parse(old.lines),...replacement.lines].some(line=>line.account.startsWith('wallet:')))await access(request,'wallets.transact');
     await db.prepare('UPDATE journal SET scope=?,description=?,lines=?,business_date=?,project_id=? WHERE id=?').run(replacement.scope,replacement.description,JSON.stringify(replacement.lines),replacement.businessDate,replacement.projectId,old.id);
     await db.prepare('DELETE FROM journal_lines WHERE entry_id=?').run(old.id);
