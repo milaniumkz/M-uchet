@@ -18,6 +18,7 @@ const bankCategories = {
   'INCOME': 'Доход',
   'EXPENSE': 'Расход',
   'CAPITAL': 'Вклад собственника',
+  'DOCUMENT_REFUND': 'Возврат денег по документу',
   'DOCUMENT': 'Оплата документа',
   'EXISTING': 'Уже учтённая операция',
   'IGNORE': 'Не проводить',
@@ -947,6 +948,9 @@ class BankReview extends StatefulWidget {
 
 class _BankReviewState extends State<BankReview> {
   String? classification, projectId, documentId, entryId, error;
+  bool get documentMode =>
+      ['DOCUMENT', 'DOCUMENT_REFUND'].contains(classification);
+  bool get refundMode => classification == 'DOCUMENT_REFUND';
   bool busy = false;
   final search = TextEditingController();
   List<Map<String, dynamic>> documents = [], candidates = [];
@@ -961,7 +965,7 @@ class _BankReviewState extends State<BankReview> {
     if (classification == 'EXISTING') {
       findCandidates();
     }
-    if (classification == 'DOCUMENT') {
+    if (documentMode) {
       findDocuments();
     }
   }
@@ -1009,7 +1013,7 @@ class _BankReviewState extends State<BankReview> {
     try {
       final result = await CommercialRepository(widget.api, widget.companyId)
           .list(
-            direction: (widget.row['amount'] as num) > 0
+            direction: ((widget.row['amount'] as num) > 0) != refundMode
                 ? 'sales'
                 : 'purchases',
             query: search.text,
@@ -1018,7 +1022,12 @@ class _BankReviewState extends State<BankReview> {
         setState(() {
           documents = (result['items'] as List)
               .map(jsonObject)
-              .where((d) => ['ISSUED', 'POSTED'].contains(d['status']))
+              .where(
+                (d) => refundMode
+                    ? (d['paid'] as num) > 0
+                    : ['ISSUED', 'POSTED'].contains(d['status']) &&
+                          (d['outstanding'] as num) > 0,
+              )
               .toList();
           error = null;
         });
@@ -1095,6 +1104,7 @@ class _BankReviewState extends State<BankReview> {
                     .where(
                       (e) =>
                           e.key == 'DOCUMENT' ||
+                          e.key == 'DOCUMENT_REFUND' ||
                           e.key == 'EXISTING' ||
                           e.key == 'IGNORE' ||
                           ((widget.row['amount'] as num) > 0
@@ -1109,17 +1119,23 @@ class _BankReviewState extends State<BankReview> {
                 onChanged: busy || pending != null
                     ? null
                     : (v) {
-                        setState(() => classification = v);
+                        setState(() {
+                          classification = v;
+                          documentId = null;
+                          entryId = null;
+                          documents = [];
+                          candidates = [];
+                        });
                         if (v == 'EXISTING') {
                           findCandidates();
                         }
-                        if (v == 'DOCUMENT') {
+                        if (['DOCUMENT', 'DOCUMENT_REFUND'].contains(v)) {
                           findDocuments();
                         }
                       },
               ),
               const SizedBox(height: 16),
-              if (!['DOCUMENT', 'EXISTING'].contains(classification))
+              if (!documentMode && classification != 'EXISTING')
                 DropdownButtonFormField<String>(
                   isExpanded: true,
                   initialValue: projectId ?? 'unassigned',
@@ -1170,7 +1186,7 @@ class _BankReviewState extends State<BankReview> {
                   ),
                 ),
               ],
-              if (classification == 'DOCUMENT') ...[
+              if (documentMode) ...[
                 TextField(
                   controller: search,
                   enabled: !busy && pending == null,
@@ -1202,7 +1218,9 @@ class _BankReviewState extends State<BankReview> {
                       '${doc['number']} · ${jsonObject(jsonObject(doc['data'])['counterparty'])['name']}',
                     ),
                     subtitle: Text(
-                      'Остаток ${moneyText(doc['outstanding'] as num, 'KZT')}',
+                      refundMode
+                          ? 'Оплачено за вычетом возвратов ${moneyText(doc['paid'] as num, 'KZT')}'
+                          : 'Остаток ${moneyText(doc['outstanding'] as num, 'KZT')}',
                     ),
                   ),
                 ),
@@ -1230,7 +1248,7 @@ class _BankReviewState extends State<BankReview> {
           onPressed:
               busy ||
                   classification == null ||
-                  (classification == 'DOCUMENT' && documentId == null) ||
+                  (documentMode && documentId == null) ||
                   (classification == 'EXISTING' && entryId == null)
               ? null
               : save,

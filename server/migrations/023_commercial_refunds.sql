@@ -1,0 +1,4 @@
+ALTER TABLE commercial_payments ADD COLUMN kind TEXT NOT NULL DEFAULT 'PAYMENT'
+ CHECK(kind IN ('PAYMENT','REFUND'));
+ALTER TABLE commercial_payments ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK(version>0);
+INSERT INTO schema_versions VALUES(24);

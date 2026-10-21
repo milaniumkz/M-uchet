@@ -87,7 +87,7 @@ try {
     assert.equal(response.status, expected, `${method} ${path}`);
     return response.json();
   }
-  assert.equal((await request("GET", "/health")).schemaVersion, 23);
+  assert.equal((await request("GET", "/health")).schemaVersion, 24);
   assert.equal((await fetch(origin + "/")).status, 200);
   assert.ok([403, 404].includes((await fetch(origin + "/.env")).status));
   await request(
@@ -211,6 +211,57 @@ try {
   const stockSummary = await request("GET", base + "/inventory/balances");
   assert.equal(stockSummary.summary.value, 161);
   assert.equal(stockSummary.summary.low, 1);
+  await request("PUT", base + "/settings", {
+    version: 0,
+    legalName: "SYNTHETIC REFUND FIRM",
+    identifier: "000000000000",
+    legalForm: "TOO",
+    taxRegime: "GENERAL",
+    vatRegistered: false,
+  });
+  const refundClient = await request("POST", base + "/resources/clients", {
+    data: { name: "SYNTHETIC REFUND CLIENT" },
+  });
+  const refundWallet = await request("POST", base + "/wallets", {
+    name: "SYNTHETIC REFUND WALLET",
+  });
+  const refundDoc = await request("POST", base + "/commercial-documents", {
+    kind: "SALE_ACT",
+    counterpartyId: refundClient.id,
+    items: [
+      {
+        description: "SYNTHETIC REFUNDED SERVICE",
+        quantity: "1",
+        unitPrice: 10000,
+      },
+    ],
+    businessDate: "2026-01-20",
+  });
+  const refundBase = base + `/commercial-documents/${refundDoc.id}`;
+  await request("POST", refundBase + "/post", {});
+  await request("POST", refundBase + "/payments", {
+    walletId: refundWallet.id,
+    amount: 10000,
+    businessDate: "2026-01-21",
+  });
+  const refund = await request("POST", refundBase + "/payments", {
+    kind: "REFUND",
+    walletId: refundWallet.id,
+    amount: 2000,
+    businessDate: "2026-01-22",
+  });
+  const refundPath = refundBase + `/payments/${refund.id}`;
+  await request("PUT", refundPath, { version: 1, amount: 3000 });
+  await request("POST", refundPath + "/void", { version: 2 });
+  await request("POST", refundPath + "/restore", { version: 3 });
+  await request("PUT", refundPath, { version: 4, amount: 10000 });
+  assert.equal((await request("GET", refundBase)).outstanding, 10000);
+  assert.equal(
+    (await request("GET", base + "/wallets")).items.find(
+      (w) => w.id === refundWallet.id,
+    ).balance,
+    0,
+  );
   const form = new FormData();
   form.append(
     "file",
@@ -346,6 +397,38 @@ try {
     ])
   ).trim();
   assert.equal(restoredBalance, "1234867");
+  const restoredRefund = (
+    await compose([
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "muchet",
+      "-d",
+      "restored",
+      "-At",
+      "-c",
+      `SELECT kind || ':' || amount::text || ':' || version::text FROM public.commercial_payments WHERE id='${refund.id}'`,
+    ])
+  ).trim();
+  assert.equal(restoredRefund, "REFUND:10000:5");
+  const restoredRefundHistory = (
+    await compose([
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "muchet",
+      "-d",
+      "restored",
+      "-At",
+      "-c",
+      `SELECT count(*) FROM public.entity_history WHERE kind='commercial_payment' AND entity_id='${refund.id}'`,
+    ])
+  ).trim();
+  assert.equal(restoredRefundHistory, "4");
   const restoredDebt = (
     await compose([
       "exec",
@@ -489,7 +572,7 @@ try {
   ).token;
   assert.ok(token);
   console.log(
-    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, stock balances and corrected counts, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
+    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected commercial refund and history, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, stock balances and corrected counts, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
   );
 } catch (error) {
   try {

@@ -68,6 +68,7 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
     const entry=await db.prepare(`SELECT e.*,j.business_date FROM wallet_entries e JOIN journal j ON j.company_id=e.company_id AND j.id=e.journal_id
       WHERE e.company_id=? AND e.wallet_id=? AND e.id=?`).get(companyId,row.wallet_id,text(id,'entryId'));
     if(!entry)fail(404,'wallet_entry_not_found');
+    if(['PAYMENT_VOID','PAYMENT_RESTORE'].includes(entry.kind))fail(409,'bank_payment_voided');
     if(entry.amount!==row.amount||entry.business_date!==row.business_date)fail(409,'bank_existing_entry_mismatch');
     if(await db.prepare("SELECT 1 FROM debt_postings WHERE company_id=? AND journal_id=? AND kind IN ('PAYMENT','PAYMENT_VOID') AND NOT active").get(companyId,entry.journal_id))fail(409,'bank_payment_voided');
     if(await db.prepare('SELECT 1 FROM payroll_payments WHERE company_id=? AND journal_id=? AND voided=TRUE').get(companyId,entry.journal_id))fail(409,'bank_payment_voided');
@@ -82,6 +83,7 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
     const items=await db.prepare(`SELECT e.id,e.amount,e.kind,e.reference_id,e.journal_id,j.business_date,j.description,j.project_id
       FROM wallet_entries e JOIN journal j ON j.company_id=e.company_id AND j.id=e.journal_id
       WHERE e.company_id=? AND e.wallet_id=? AND e.amount=? AND j.business_date=?
+      AND e.kind NOT IN ('PAYMENT_VOID','PAYMENT_RESTORE')
       AND NOT EXISTS(SELECT 1 FROM bank_import_rows r WHERE r.company_id=e.company_id AND r.wallet_id=e.wallet_id AND (r.journal_id=e.journal_id OR r.matched_entry_id=e.id) AND r.id<>?)
       AND NOT EXISTS(SELECT 1 FROM debt_postings p WHERE p.company_id=e.company_id AND p.journal_id=e.journal_id AND p.kind IN ('PAYMENT','PAYMENT_VOID') AND NOT p.active)
       AND NOT EXISTS(SELECT 1 FROM payroll_payments p WHERE p.company_id=e.company_id AND p.journal_id=e.journal_id AND p.voided=TRUE)
@@ -95,16 +97,17 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
     if(row.journal_id)fail(409,'bank_edit_source_required');
     if(body.version!==row.version)fail(409,'version_conflict');
     const type=body.classification;
-    if(!['INCOME','EXPENSE','CAPITAL','DOCUMENT','EXISTING','IGNORE'].includes(type))fail(400,'invalid_bank_classification');
+    if(!['INCOME','EXPENSE','CAPITAL','DOCUMENT','DOCUMENT_REFUND','EXISTING','IGNORE'].includes(type))fail(400,'invalid_bank_classification');
     if((type==='INCOME'||type==='CAPITAL')&&row.amount<0||type==='EXPENSE'&&row.amount>0)fail(400,'bank_direction_mismatch');
     if(type==='EXISTING')await existingEntry(request,company.id,row,body.entryId);
-    const projectId=await projectReference(db,company.id,body.projectId),documentId=type==='DOCUMENT'?text(body.documentId,'documentId'):null;
+    const projectId=await projectReference(db,company.id,body.projectId),documentId=['DOCUMENT','DOCUMENT_REFUND'].includes(type)?text(body.documentId,'documentId'):null;
     if(documentId){
       await access(request,'documents.read');
       const doc=await db.prepare('SELECT * FROM commercial_documents WHERE company_id=? AND id=?').get(company.id,documentId);
       if(!doc)fail(404,'document_not_found');
-      if((doc.kind==='PURCHASE_ACT')!==(row.amount<0))fail(400,'bank_direction_mismatch');
-      if(!['ISSUED','POSTED'].includes(doc.status))fail(409,'document_not_posted');
+      const refund = type === 'DOCUMENT_REFUND';
+      if((doc.kind==='PURCHASE_ACT')!==((row.amount<0)!==refund))fail(400,'bank_direction_mismatch');
+      if(!refund && !['ISSUED','POSTED'].includes(doc.status))fail(409,'document_not_posted');
     }
     await db.prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)').run(company.id,'bank_row',row.id,JSON.stringify(row),request.user.id);
     await db.prepare('UPDATE bank_import_rows SET classification=?,project_id=?,document_id=?,matched_entry_id=?,version=version+1 WHERE id=?').run(type,projectId,documentId,type==='EXISTING'?body.entryId:null,row.id);
@@ -132,10 +135,10 @@ export function registerBankRoutes(app, { db, auth, access, command, object, set
       journalId=entry.journal_id;
       const payment=await db.prepare('SELECT id,document_id FROM commercial_payments WHERE company_id=? AND journal_id=? AND voided=FALSE').get(company.id,journalId);
       paymentId=payment?.id??null;sourceDocumentId=payment?.document_id??null;
-    }else if(row.classification==='DOCUMENT'){
+    }else if(['DOCUMENT','DOCUMENT_REFUND'].includes(row.classification)){
       await access(request,'documents.settle');
       // Reuse precisely the same financial command as document payment entry.
-      const settled=await settleDocument(company,{...request,params:{...request.params,id:row.document_id},body:{walletId:row.wallet_id,amount:Math.abs(row.amount),businessDate:row.business_date}});
+      const settled=await settleDocument(company,{...request,params:{...request.params,id:row.document_id},body:{walletId:row.wallet_id,amount:Math.abs(row.amount),businessDate:row.business_date,kind:row.classification==='DOCUMENT_REFUND'?'REFUND':'PAYMENT'}});
       paymentId=settled.id;
       journalId=(await db.prepare('SELECT journal_id FROM commercial_payments WHERE company_id=? AND id=?').get(company.id,paymentId)).journal_id;
     }else{

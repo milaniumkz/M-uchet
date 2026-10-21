@@ -64,7 +64,7 @@
       "status": "partial",
       "visual_parity_verified": false,
       "source": "lib/workspace/commercial_detail.dart",
-      "implemented_scope": "Счёт, аванс, акт, оплаты, история, PDF, файлы"
+      "implemented_scope": "Счёт, аванс, акт, оплаты, история, PDF, файлы; реальные возвраты денег, их исправления и история с автором, сверка без повторного платежа"
     },
     {
       "id": "D-08",
@@ -73,7 +73,7 @@
       "status": "partial",
       "visual_parity_verified": false,
       "source": "lib/workspace/commercial_detail.dart",
-      "implemented_scope": "Акт услуг, изменение проведённого документа и оплат"
+      "implemented_scope": "Акт услуг, изменение проведённого документа и оплат; реальные возвраты денег, их исправления и история с автором, сверка без повторного платежа"
     },
     {
       "id": "D-09",
@@ -98,7 +98,7 @@
       "status": "partial",
       "visual_parity_verified": false,
       "source": "lib/workspace/commercial_workspace.dart",
-      "implemented_scope": "Покупки услуг; товары ещё отдельный FIFO-процесс"
+      "implemented_scope": "Покупки услуг; товары ещё отдельный FIFO-процесс; возвраты денег от поставщиков услуг и датированные взаиморасчёты"
     },
     {
       "id": "D-12",
@@ -299,7 +299,7 @@
       "status": "partial",
       "visual_parity_verified": false,
       "source": "lib/workspace/commercial_detail.dart",
-      "implemented_scope": "Карточка документа с историей и вложениями"
+      "implemented_scope": "Карточка документа с историей и вложениями; реальные возвраты денег, их исправления и история с автором, сверка без повторного платежа"
     },
     {
       "id": "M-05",

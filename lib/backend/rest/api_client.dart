@@ -54,6 +54,12 @@ class BackendException implements Exception {
       'invalid_pending_input_vat':
           'Проверьте регистрацию по НДС и сумму входящего НДС.',
       'counterparty_not_found': 'Контрагент не найден или недоступен.',
+      'refund_exceeds_paid_on_date':
+          'Возврат превышает сумму фактических оплат на выбранную дату. Проверьте даты оплат и возвратов.',
+      'payment_kind_immutable':
+          'Чтобы изменить вид операции, отмените эту запись и создайте новую.',
+      'settlement_amount_out_of_range':
+          'Сумма взаиморасчётов превышает поддерживаемый диапазон.',
       'overpayment': 'Сумма превышает остаток к оплате.',
       'payroll_rule_period_not_supported':
           'Проверены правила зарплаты только за 2026 год.',

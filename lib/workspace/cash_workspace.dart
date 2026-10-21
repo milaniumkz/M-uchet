@@ -17,6 +17,7 @@ const cashKinds = {
   'TRANSFER_IN': 'Перевод: поступление',
   'TRANSFER_OUT': 'Перевод: списание',
   'BALANCE_EDIT': 'Корректировка остатка',
+  'DOCUMENT_REFUND': 'Возврат денег по документу',
   'DOCUMENT_PAYMENT': 'Оплата документа',
   'MANUAL': 'Бухгалтерская запись',
   'JOURNAL_REVERSAL': 'Сторно записи',

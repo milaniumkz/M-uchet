@@ -334,7 +334,7 @@ test('database and migrations survive close/reopen without losing data', async t
   app = await createApp({ dataDir: directory, schema });
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', payload: { login: 'persistent', password: 'persistent-password' } });
   assert.equal(login.statusCode, 200);
-  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 23);
+  assert.equal((await app.db.prepare('SELECT count(*) AS n FROM schema_versions').get()).n, 24);
 });
 
 test('wallet transfers and debt settlements are atomic and idempotent', async t => {
@@ -679,6 +679,177 @@ test('moving act after its payment date reclassifies payment as an advance until
  const row=await f.app.db.prepare("SELECT SUM(l.debit-l.credit) AS balance FROM journal_lines l JOIN journal j ON j.id=l.entry_id WHERE j.company_id=? AND j.business_date<=? AND l.account='customer_advances'").get(f.company.id,'2026-10-21');
  assert.equal(row.balance,-10000);
  assert.equal((await f.api('GET','/wallets')).body.items[0].balance,10000);
+});
+test('client and supplier refunds preserve dated cash, reopen debt and support audited corrections',async t=>{
+ for(const purchase of [false,true]){
+  const f=await commercialFixture(t);
+  if(purchase)await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:20000,description:'Funding',businessDate:'2026-10-01'});
+  let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:purchase?'PURCHASE_ACT':'SALE_ACT',counterpartyId:purchase?f.supplier.id:f.client.id})).body;
+  doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+  const paid=(await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'})).body;
+  const path=`/commercial-documents/${doc.id}/payments`,body={kind:'REFUND',walletId:f.wallet.id,amount:2500,businessDate:'2026-10-22'},key=randomUUID();
+  const refund=await f.api('POST',path,body,key);assert.equal(refund.status,200);assert.equal((await f.api('POST',path,body,key)).body.id,refund.body.id);assert.equal(refund.body.document.paid,7500);assert.equal(refund.body.document.outstanding,2500);
+  const record=(await f.api('GET',path)).body.items.find(p=>p.id===refund.body.id);assert.equal(record.kind,'REFUND');assert.equal(record.version,1);
+  let wallet=(await f.api('GET','/wallets')).body.items.find(w=>w.id===f.wallet.id);assert.equal(wallet.balance,purchase?12500:7500);
+  const report=(await f.api('GET','/reports/profit-loss')).body;assert.equal(purchase?report.expenses:report.revenue,10000);
+  const entries=(await f.api('GET',`/wallets/${f.wallet.id}/entries`)).body.items;const cash=entries.find(e=>e.reference_id===record.id);assert.equal(cash.kind,'DOCUMENT_REFUND');assert.equal(cash.amount,purchase?2500:-2500);
+  assert.equal((await f.api('PUT',`/accounting/journal/${record.journal_id}`,{description:'Manual rename',lines:[{account:'cash',debit:1},{account:'capital',credit:1}]})).body.error,'source_document_edit_required');
+  assert.equal((await f.api('PUT',`${path}/${record.id}`,{version:1,amount:3000,businessDate:'2026-10-23'})).status,200);
+  assert.equal((await f.api('PUT',`${path}/${record.id}`,{version:1,amount:4000})).body.error,'version_conflict');
+  assert.equal((await f.api('PUT',`${path}/${record.id}`,{version:2,kind:'PAYMENT'})).body.error,'payment_kind_immutable');
+  assert.equal((await f.api('POST',`${path}/${paid.id}/void`,{})).body.error,'refund_exceeds_paid_on_date');
+  assert.equal((await f.api('GET',path)).body.items.find(p=>p.id===paid.id).voided,false);
+  assert.equal((await f.api('POST',`${path}/${record.id}/void`,{version:2})).status,200);assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.outstanding,0);
+  assert.equal((await f.api('POST',`${path}/${record.id}/restore`,{version:3})).status,200);assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.outstanding,3000);
+  const history=await f.app.db.prepare("SELECT count(*) AS n FROM entity_history WHERE company_id=? AND kind='commercial_payment' AND entity_id=?").get(f.company.id,record.id);assert.equal(history.n,3);
+  assert.equal((await f.api('POST',path,{...body,businessDate:'2026-10-19'})).body.error,'refund_exceeds_paid_on_date');
+  assert.equal((await f.api('POST',path,{...body,amount:7001})).body.error,'refund_exceeds_paid_on_date');
+  assert.equal((await f.api('GET',path)).body.items.filter(p=>p.kind==='REFUND').length,1);
+  const statement=(await f.api('GET',`/counterparties/${purchase?'suppliers':'clients'}/${purchase?f.supplier.id:f.client.id}/statement`)).body;
+  assert.equal(statement.accounts.find(a=>a.account===(purchase?'payables':'receivables')).closing,purchase?-3000:3000);
+  assert.equal((await f.api('GET','/commercial-documents?direction='+(purchase?'purchases':'sales'))).body.summary.outstanding,3000);
+ }
+});
+test('concurrent refunds cannot return the same paid money twice',async t=>{
+ const f=await commercialFixture(t);let doc=(await f.api('POST','/commercial-documents',f.body)).body;doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ const path=`/commercial-documents/${doc.id}/payments`;
+ await f.api('POST',path,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'});
+ const body={kind:'REFUND',walletId:f.wallet.id,amount:6000,businessDate:'2026-10-22'};
+ const results=await Promise.all([f.api('POST',path,body),f.api('POST',path,body)]);
+ assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);assert.equal(results.find(r=>r.status===409).body.error,'refund_exceeds_paid_on_date');
+ assert.equal((await f.api('GET',`/commercial-documents/${doc.id}`)).body.paid,4000);assert.equal((await f.api('GET','/wallets')).body.items[0].balance,4000);
+ assert.equal((await f.api('GET',path)).body.items.filter(p=>p.kind==='REFUND').length,1);
+});
+test('cash refunds leave sales VAT and pending purchase VAT unchanged until the source act is corrected',async t=>{
+ const f=await commercialFixture(t,{vat:true});
+ await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:20000,description:'Funding'});
+ for(const purchase of [false,true]){
+  let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:purchase?'PURCHASE_ACT':'SALE_ACT',counterpartyId:purchase?f.supplier.id:f.client.id,vatBasisPoints:1600,...(purchase?{vatTreatment:'PENDING'}:{})})).body;
+  doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+  const path=`/commercial-documents/${doc.id}/payments`;
+  assert.equal((await f.api('POST',path,{walletId:f.wallet.id,amount:11600,businessDate:'2026-10-21'})).status,200);
+  assert.equal((await f.api('POST',path,{kind:'REFUND',walletId:f.wallet.id,amount:1000,businessDate:'2026-10-22'})).status,200);
+ }
+ const accounts=(await f.api('GET','/accounting/trial-balance')).body.accounts;
+ assert.equal(accounts.find(a=>a.account==='vat_payable').balance,-1600);assert.equal(accounts.find(a=>a.account==='pending_input_vat').balance,1600);
+ const report=(await f.api('GET','/reports/profit-loss')).body;assert.equal(report.revenue,10000);assert.equal(report.expenses,10000);
+});
+test('refund commands and payment history enforce company isolation, wallet access and positive minor units',async t=>{
+ const f=await commercialFixture(t);let doc=(await f.api('POST','/commercial-documents',f.body)).body;doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'});
+ const url=f.prefix+`/commercial-documents/${doc.id}/payments`,body={kind:'REFUND',walletId:f.wallet.id,amount:1000,businessDate:'2026-10-22'};
+ const reader=await f.user('synthetic-refund-reader@example.test');await f.api('PUT',`/members/${reader.id}`,{permissions:['documents.read']});
+ assert.equal((await f.call('POST',url,body,reader.token,{'idempotency-key':randomUUID()})).status,403);
+ await f.api('PUT',`/members/${reader.id}`,{permissions:['documents.settle']});
+ assert.equal((await f.call('POST',url,body,reader.token,{'idempotency-key':randomUUID()})).status,403);
+ for(const amount of [0,-1,0.5,Number.MAX_SAFE_INTEGER])assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/payments`,{...body,amount})).status,400);
+ assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/payments`,{...body,walletId:'foreign-wallet'})).status,404);
+ assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/payments`,{...body,kind:'OTHER'})).status,400);
+ const refund=(await f.api('POST',`/commercial-documents/${doc.id}/payments`,body)).body;
+ assert.equal((await f.api('PUT',`/commercial-documents/${doc.id}/payments/${refund.id}`,{version:1,amount:1500})).status,200);
+ const history=await f.api('GET',`/commercial-documents/${doc.id}/payments/${refund.id}/history`);assert.equal(history.status,200);assert.equal(history.body.items.length,1);assert.equal(history.body.items[0].snapshot.amount,1000);assert.ok(history.body.items[0].actor_name);assert.equal(history.body.payment.version,2);
+ const outsider=await f.user('synthetic-refund-outsider@example.test');assert.equal((await f.call('GET',url+`/${refund.id}/history`,undefined,outsider.token)).status,404);
+});
+test('refund of a cancelled document reduces its advance without inventing revenue or expenses',async t=>{
+ const f=await commercialFixture(t);let doc=(await f.api('POST','/commercial-documents',f.body)).body;
+ doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'});
+ await f.api('POST',`/commercial-documents/${doc.id}/cancel`,{});
+ const refunded=await f.api('POST',`/commercial-documents/${doc.id}/payments`,{kind:'REFUND',walletId:f.wallet.id,amount:4000,businessDate:'2026-10-22'});assert.equal(refunded.status,200);assert.equal(refunded.body.document.customerCredit,6000);assert.equal(refunded.body.document.outstanding,0);
+ assert.equal((await f.api('GET','/reports/profit-loss')).body.revenue,0);
+ const balance=(await f.api('GET','/accounting/trial-balance')).body.accounts;assert.equal(balance.find(a=>a.account==='customer_advances').balance,-6000);
+});
+test('invoice and act share net cash through refunds, cancellation and restoration',async t=>{
+ const f=await commercialFixture(t);let invoice=(await f.api('POST','/commercial-documents',{...f.body,kind:'SALE_INVOICE'})).body;
+ invoice=(await f.api('POST',`/commercial-documents/${invoice.id}/post`,{})).body;
+ await f.api('POST',`/commercial-documents/${invoice.id}/payments`,{walletId:f.wallet.id,amount:6000,businessDate:'2026-10-19'});
+ let act=(await f.api('POST',`/commercial-documents/${invoice.id}/act`,{})).body;act=(await f.api('POST',`/commercial-documents/${act.id}/post`,{})).body;
+ await f.api('POST',`/commercial-documents/${act.id}/payments`,{walletId:f.wallet.id,amount:4000,businessDate:'2026-10-21'});
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/payments`,{kind:'REFUND',walletId:f.wallet.id,amount:7000,businessDate:'2026-10-22'})).status,200);
+ assert.equal((await f.api('GET',`/commercial-documents/${invoice.id}`)).body.paid,3000);
+ assert.equal((await f.api('GET',`/commercial-documents/${invoice.id}`)).body.outstanding,0);
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/cancel`,{})).status,200);
+ assert.equal((await f.api('GET',`/commercial-documents/${invoice.id}`)).body.outstanding,7000);
+ const topUp=await f.api('POST',`/commercial-documents/${invoice.id}/payments`,{walletId:f.wallet.id,amount:2000,businessDate:'2026-10-23'});assert.equal(topUp.status,200);
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/post`,{})).status,200);
+ assert.equal((await f.api('GET',`/commercial-documents/${act.id}`)).body.outstanding,5000);
+ assert.equal((await f.api('GET','/commercial-documents')).body.summary.outstanding,5000);
+ assert.equal((await f.api('GET',`/commercial-documents/${invoice.id}/payments`)).body.items.length,4);
+});
+test('bank review creates customer and supplier refunds through the same dated settlement command',async t=>{
+ for(const purchase of [false,true]){
+  const f=await commercialFixture(t);if(purchase)await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:20000,description:'Funding'});
+  let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:purchase?'PURCHASE_ACT':'SALE_ACT',counterpartyId:purchase?f.supplier.id:f.client.id})).body;doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+  await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'});
+  if(purchase)await f.api('POST',`/commercial-documents/${doc.id}/cancel`,{});
+  const imported=(await f.api('POST','/bank-imports',{walletId:f.wallet.id,csv:'date;reference;debit;credit;description\n2026-10-22;new-refund;'+(purchase?'0;25.00':'25.00;0')+';SYNTHETIC REFUND'})).body;
+  const row=(await f.api('GET',`/bank-imports/${imported.id}`)).body.items[0],path=`/bank-imports/${imported.id}/rows/${row.id}`;
+  assert.equal((await f.api('PUT',path,{version:1,classification:'DOCUMENT',documentId:doc.id})).body.error,'bank_direction_mismatch');
+  assert.equal((await f.api('PUT',path,{version:1,classification:'DOCUMENT_REFUND',documentId:doc.id})).status,200);
+  const posted=await f.api('POST',path+'/post',{version:2});assert.equal(posted.status,200);assert.ok(posted.body.payment_id);
+  assert.equal((await f.api('POST',path+'/post',{version:2})).body.payment_id,posted.body.payment_id);
+  const net=(await f.api('GET',`/commercial-documents/${doc.id}`)).body;assert.equal(net.paid,7500);assert.equal(net.outstanding,purchase?0:2500);assert.equal(net.customerCredit,purchase?7500:0);
+  const refunds=(await f.api('GET',`/commercial-documents/${doc.id}/payments`)).body.items.filter(p=>p.kind==='REFUND');assert.equal(refunds.length,1);assert.equal(refunds[0].journal_id,posted.body.journal_id);
+  assert.equal((await f.api('GET',`/bank-imports/${imported.id}`)).body.items[0].reconciliation_status,'MATCHED');
+ }
+});
+test('bank matches a real refund once and excludes its void and restoration audit entries',async t=>{
+ const f=await commercialFixture(t);let doc=(await f.api('POST','/commercial-documents',f.body)).body;doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+ await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:10000,businessDate:'2026-10-21'});
+ const refunded=(await f.api('POST',`/commercial-documents/${doc.id}/payments`,{kind:'REFUND',walletId:f.wallet.id,amount:2000,businessDate:'2026-10-22'})).body;
+ const imported=(await f.api('POST','/bank-imports',{walletId:f.wallet.id,csv:'date;reference;debit;credit;description\n2026-10-22;refund-1;20.00;0;Refund to client\n2026-10-22;refund-2;20.00;0;Duplicate refund'})).body;
+ const rows=(await f.api('GET',`/bank-imports/${imported.id}`)).body.items,row=rows[0],path=`/bank-imports/${imported.id}/rows/${row.id}`;
+ let candidates=(await f.api('GET',path+'/candidates')).body.items;assert.equal(candidates.length,1);
+ const source=candidates[0];assert.equal(source.kind,'DOCUMENT_REFUND');
+ assert.equal((await f.api('PUT',path,{version:1,classification:'EXISTING',entryId:source.id})).status,200);assert.equal((await f.api('POST',path+'/post',{version:2})).status,200);
+ const paymentPath=`/commercial-documents/${doc.id}/payments/${refunded.id}`;
+ assert.equal((await f.api('POST',paymentPath+'/void',{version:1})).status,200);
+ assert.equal((await f.api('GET',`/bank-imports/${imported.id}`)).body.items.find(r=>r.id===row.id).reconciliation_status,'PAYMENT_VOIDED');
+ assert.equal((await f.api('POST',paymentPath+'/restore',{version:2})).status,200);
+ assert.equal((await f.api('GET',`/bank-imports/${imported.id}`)).body.items.find(r=>r.id===row.id).reconciliation_status,'MATCHED');
+ assert.equal((await f.api('GET',`/bank-imports/${imported.id}/rows/${rows[1].id}/candidates`)).body.items.length,0);
+ const restoreEntry=(await f.api('GET',`/wallets/${f.wallet.id}/entries`)).body.items.find(e=>e.kind==='PAYMENT_RESTORE');assert.ok(restoreEntry);
+ assert.equal((await f.api('PUT',`/bank-imports/${imported.id}/rows/${rows[1].id}`,{version:1,classification:'EXISTING',entryId:restoreEntry.id})).body.error,'bank_payment_voided');
+ assert.equal((await f.api('PUT',paymentPath,{version:3,amount:2500})).status,200);
+ assert.equal((await f.api('GET',`/bank-imports/${imported.id}`)).body.items.find(r=>r.id===row.id).reconciliation_status,'SOURCE_CHANGED');
+});
+test('corrected service excess is recognized on each actual payment date for clients and suppliers',async t=>{
+ for(const purchase of [false,true]){
+  const f=await commercialFixture(t);
+  if(purchase)await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:30000,description:'Funding',businessDate:'2026-10-01'});
+  let doc=(await f.api('POST','/commercial-documents',{...f.body,kind:purchase?'PURCHASE_ACT':'SALE_ACT',counterpartyId:purchase?f.supplier.id:f.client.id})).body;
+  doc=(await f.api('POST',`/commercial-documents/${doc.id}/post`,{})).body;
+  const first=await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:4000,businessDate:'2026-10-22'});assert.equal(first.status,200);
+  const second=await f.api('POST',`/commercial-documents/${doc.id}/payments`,{walletId:f.wallet.id,amount:6000,businessDate:'2026-10-25'});assert.equal(second.status,200);
+  const edit=await f.api('PUT',`/commercial-documents/${doc.id}`,{version:doc.version,items:[{description:'Corrected service',quantity:'1',unitPrice:3000}]});assert.equal(edit.status,200);assert.equal(edit.body.customerCredit,7000);
+  const claim=purchase?'payables':'receivables',advance=purchase?'supplier_advances':'customer_advances',sign=purchase?-1:1;
+  const balance=async(date,account)=>(await f.app.db.prepare('SELECT COALESCE(SUM(l.debit-l.credit),0) AS balance FROM journal_lines l JOIN journal j ON j.id=l.entry_id WHERE j.company_id=? AND j.business_date<=? AND l.account=?').get(f.company.id,date,account)).balance;
+  assert.equal(await balance('2026-10-20',claim),sign*3000);assert.equal(await balance('2026-10-20',advance),0);
+  assert.equal(await balance('2026-10-22',claim),0);assert.equal(await balance('2026-10-22',advance),-sign*1000);
+  assert.equal(await balance('2026-10-25',claim),0);assert.equal(await balance('2026-10-25',advance),-sign*7000);
+  const moved=await f.api('PUT',`/commercial-documents/${doc.id}/payments/${second.body.id}`,{businessDate:'2026-10-19'});assert.equal(moved.status,200);
+  assert.equal(await balance('2026-10-19',claim),0);assert.equal(await balance('2026-10-19',advance),-sign*6000);
+  assert.equal(await balance('2026-10-20',claim),0);assert.equal(await balance('2026-10-20',advance),-sign*3000);
+  assert.equal(await balance('2026-10-22',advance),-sign*7000);
+  const path=`/commercial-documents/${doc.id}/payments/${second.body.id}`;
+  assert.equal((await f.api('POST',path+'/void',{})).status,200);
+  assert.equal(await balance('2026-10-19',advance),0);assert.equal(await balance('2026-10-20',claim),sign*3000);assert.equal(await balance('2026-10-22',advance),-sign*1000);
+  assert.equal((await f.api('POST',path+'/restore',{})).status,200);assert.equal(await balance('2026-10-20',advance),-sign*3000);
+  assert.equal((await f.api('POST',`/commercial-documents/${doc.id}/cancel`,{})).status,200);
+  assert.equal(await balance('2026-10-20',claim),0);assert.equal(await balance('2026-10-19',advance),-sign*6000);assert.equal(await balance('2026-10-22',advance),-sign*10000);
+ }
+});
+test('draft conversion preserves invoice payment project until the act is posted',async t=>{
+ const f=await commercialFixture(t),other=(await f.api('POST','/projects',{name:'SYNTHETIC SECOND PROJECT'})).body;
+ let invoice=(await f.api('POST','/commercial-documents',{...f.body,kind:'SALE_INVOICE'})).body;
+ invoice=(await f.api('POST',`/commercial-documents/${invoice.id}/post`,{})).body;
+ const paid=await f.api('POST',`/commercial-documents/${invoice.id}/payments`,{walletId:f.wallet.id,amount:4000,businessDate:'2026-10-19'});assert.equal(paid.status,200);
+ let act=(await f.api('POST',`/commercial-documents/${invoice.id}/act`,{})).body;
+ act=(await f.api('PUT',`/commercial-documents/${act.id}`,{version:act.version,projectId:other.id})).body;
+ const paymentProject=async()=> (await f.app.db.prepare('SELECT j.project_id FROM commercial_payments p JOIN journal j ON j.id=p.journal_id WHERE p.id=?').get(paid.body.id)).project_id;
+ assert.equal(await paymentProject(),f.project.id);
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/post`,{})).status,200);assert.equal(await paymentProject(),other.id);
+ assert.equal((await f.api('POST',`/commercial-documents/${act.id}/cancel`,{})).status,200);assert.equal(await paymentProject(),f.project.id);
 });
 test('print export is authorized, escapes client text and metadata mutations replay safely',async t=>{
  const f=await commercialFixture(t);

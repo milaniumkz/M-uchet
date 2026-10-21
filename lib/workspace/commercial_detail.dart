@@ -140,7 +140,7 @@ class _CommercialDetailState extends State<CommercialDetail> {
     }
   }
 
-  Future<void> pay([Map<String, dynamic>? payment]) async {
+  Future<void> pay([Map<String, dynamic>? payment, bool refund = false]) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
@@ -149,6 +149,7 @@ class _CommercialDetailState extends State<CommercialDetail> {
         doc: doc,
         currency: widget.currency,
         payment: payment,
+        refund: refund,
       ),
     );
     if (result != null && mounted) {
@@ -156,6 +157,7 @@ class _CommercialDetailState extends State<CommercialDetail> {
       if (!mounted) return;
       setState(() => doc = updated);
       if (tab == 3) await showRelated(3);
+      if (!mounted) return;
       await widget.onChanged();
     }
   }
@@ -191,6 +193,65 @@ class _CommercialDetailState extends State<CommercialDetail> {
     }
   }
 
+  Future<void> paymentHistory(Map<String, dynamic> payment) async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final result = jsonObject(
+        await widget.api.request('GET', [
+          ...repository.path(payment['document_id'] as String, 'payments'),
+          payment['id'] as String,
+          'history',
+        ]),
+      );
+      if (!mounted) return;
+      setState(() => busy = false);
+      final rows = (result['items'] as List).map(jsonObject).toList();
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('История денежной операции'),
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Текущая запись'),
+                  Text(
+                    '${payment['business_date']} · ${moneyText(payment['amount'] as num, widget.currency)} · версия ${payment['version'] ?? 1}',
+                  ),
+                  const SizedBox(height: 16),
+                  if (rows.isEmpty) const Text('Исправлений пока нет.'),
+                  for (final row in rows) ...[
+                    Text('${row['changed_at']} · ${row['actor_name']}'),
+                    Text(
+                      'До исправления: ${row['snapshot']['business_date']} · ${moneyText(row['snapshot']['amount'] as num, widget.currency)}${row['snapshot']['voided'] == true ? ' · запись отменена' : ''}',
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Закрыть историю'),
+            ),
+          ],
+        ),
+      );
+    } on BackendException catch (e) {
+      if (mounted) setState(() => error = e.message);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   Widget paymentCard(Map<String, dynamic> payment) => Card(
     key: ValueKey('payment-${payment['id']}'),
     child: Padding(
@@ -201,11 +262,18 @@ class _CommercialDetailState extends State<CommercialDetail> {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Text(
-            '${payment['business_date']} · ${moneyText(payment['amount'] as num, widget.currency)}${payment['voided'] == true ? ' · запись отменена' : ''}',
+            '${payment['kind'] == 'REFUND' ? 'Возврат денег · ' : ''}${payment['business_date']} · ${moneyText(payment['amount'] as num, widget.currency)}${payment['voided'] == true ? ' · запись отменена' : ''}',
+          ),
+          IconButton(
+            tooltip: 'История операции',
+            onPressed: busy || uncertain ? null : () => paymentHistory(payment),
+            icon: const Icon(Icons.history),
           ),
           if (payment['voided'] != true)
             IconButton(
-              tooltip: 'Изменить оплату',
+              tooltip: payment['kind'] == 'REFUND'
+                  ? 'Изменить возврат'
+                  : 'Изменить оплату',
               onPressed: busy || uncertain || !canSettle
                   ? null
                   : () => pay(payment),
@@ -215,14 +283,21 @@ class _CommercialDetailState extends State<CommercialDetail> {
             onPressed: busy || uncertain || !canSettle
                 ? null
                 : () => execute(
-                    RetriableCommand('POST', [
-                      ...repository.path(
-                        payment['document_id'] as String,
-                        'payments',
-                      ),
-                      payment['id'] as String,
-                      payment['voided'] == true ? 'restore' : 'void',
-                    ], const {}),
+                    RetriableCommand(
+                      'POST',
+                      [
+                        ...repository.path(
+                          payment['document_id'] as String,
+                          'payments',
+                        ),
+                        payment['id'] as String,
+                        payment['voided'] == true ? 'restore' : 'void',
+                      ],
+                      {
+                        if (payment['version'] != null)
+                          'version': payment['version'],
+                      },
+                    ),
                   ),
             child: Text(
               payment['voided'] == true
@@ -317,6 +392,18 @@ class _CommercialDetailState extends State<CommercialDetail> {
                       FilledButton(
                         onPressed: enabled && canSettle ? pay : null,
                         child: const Text('Связать оплату'),
+                      ),
+                    if ((doc['paid'] as num? ?? 0) > 0)
+                      OutlinedButton.icon(
+                        onPressed: enabled && canSettle
+                            ? () => pay(null, true)
+                            : null,
+                        icon: const Icon(Icons.undo),
+                        label: Text(
+                          doc['kind'] == 'PURCHASE_ACT'
+                              ? 'Возврат от поставщика'
+                              : 'Возврат клиенту',
+                        ),
                       ),
                     if (doc['status'] != 'CANCELLED')
                       TextButton(
@@ -528,8 +615,10 @@ class _PaymentDialog extends StatefulWidget {
     required this.doc,
     required this.currency,
     this.payment,
+    this.refund = false,
   });
   final CommercialRepository repository;
+  final bool refund;
   final Map<String, dynamic>? payment;
   final Map<String, dynamic> doc;
   final String currency;
@@ -538,9 +627,12 @@ class _PaymentDialog extends StatefulWidget {
 }
 
 class _PaymentDialogState extends State<_PaymentDialog> {
+  bool get refund =>
+      widget.payment?['kind'] == 'REFUND' ||
+      (widget.payment == null && widget.refund);
   List<Map<String, dynamic>> wallets = [];
   String? walletId, error;
-  String amount = '', date = DateTime.now().toIso8601String().substring(0, 10);
+  String amount = '', date = '';
   bool loading = true, busy = false, uncertain = false;
   RetriableCommand? pending;
   @override
@@ -564,6 +656,9 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       if (mounted) {
         setState(() {
           wallets = (result['items'] as List).map(jsonObject).toList();
+          if (widget.payment == null) {
+            date = result['businessDate'] as String? ?? '';
+          }
           walletId =
               widget.payment?['wallet_id'] as String? ??
               (wallets.isEmpty ? null : wallets.first['id'] as String);
@@ -593,6 +688,9 @@ class _PaymentDialogState extends State<_PaymentDialog> {
         'walletId': walletId,
         'amount': parseMoney(amount),
         'businessDate': date,
+        'kind': refund ? 'REFUND' : 'PAYMENT',
+        if (widget.payment?['version'] != null)
+          'version': widget.payment!['version'],
       };
       pending ??= widget.payment == null
           ? widget.repository.action(
@@ -619,7 +717,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
             pending = null;
           }
           error = uncertain
-              ? 'Результат оплаты неизвестен. Повторите эту же оплату: повторного движения денег не будет.'
+              ? 'Результат денежной операции неизвестен. Повторите это же действие: повторного движения денег не будет.'
               : e.message;
         });
       }
@@ -639,7 +737,13 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     canPop: pending == null,
     child: AlertDialog(
       title: Text(
-        widget.payment == null ? 'Связать оплату' : 'Изменить запись оплаты',
+        refund
+            ? (widget.payment == null
+                  ? 'Возврат денег'
+                  : 'Изменить возврат денег')
+            : (widget.payment == null
+                  ? 'Связать оплату'
+                  : 'Изменить запись оплаты'),
       ),
       content: SizedBox(
         width: 484,
@@ -650,8 +754,17 @@ class _PaymentDialogState extends State<_PaymentDialog> {
             children: [
               if (loading || busy) const LinearProgressIndicator(),
               Text(
-                'Осталось оплатить: ${moneyText(widget.doc['outstanding'] as num, widget.currency)}',
+                refund
+                    ? 'Оплачено за вычетом возвратов: ${moneyText(widget.doc['paid'] as num, widget.currency)}'
+                    : 'Осталось оплатить: ${moneyText(widget.doc['outstanding'] as num, widget.currency)}',
               ),
+              if (refund)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Возврат меняет движение денег и взаиморасчёты. Для изменения стоимости услуг и НДС исправьте сам документ.',
+                  ),
+                ),
               const SizedBox(height: 20),
               DropdownButtonFormField<String>(
                 initialValue: walletId,
@@ -665,12 +778,14 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                       ),
                     )
                     .toList(),
-                onChanged: busy || uncertain ? null : (v) => walletId = v,
+                onChanged: loading || busy || uncertain
+                    ? null
+                    : (v) => walletId = v,
               ),
               const SizedBox(height: 20),
               TextFormField(
                 initialValue: amount,
-                enabled: !busy && !uncertain,
+                enabled: !loading && !busy && !uncertain,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
@@ -681,8 +796,9 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               ),
               const SizedBox(height: 20),
               TextFormField(
+                key: ValueKey('payment-date-$loading'),
                 initialValue: date,
-                enabled: !busy && !uncertain,
+                enabled: !loading && !busy && !uncertain,
                 decoration: const InputDecoration(
                   labelText: 'Дата оплаты: ГГГГ-ММ-ДД',
                 ),
@@ -704,12 +820,18 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: busy ? null : () => Navigator.pop(context),
+          onPressed: busy || uncertain ? null : () => Navigator.pop(context),
           child: const Text('Отмена'),
         ),
         FilledButton(
           onPressed: busy || loading ? null : save,
-          child: Text(uncertain ? 'Повторить оплату' : 'Сохранить оплату'),
+          child: Text(
+            uncertain
+                ? 'Повторить оплату'
+                : refund
+                ? 'Сохранить возврат'
+                : 'Сохранить оплату',
+          ),
         ),
       ],
     ),

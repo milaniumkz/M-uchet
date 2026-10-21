@@ -1,4 +1,5 @@
 import { readSnapshot } from './db.js';
+import { planSettlements } from './settlement-planner.js';
 import { randomUUID } from 'node:crypto';
 import { fail, integer, text, scope, businessDate } from './security.js';
 import { postJournal, projectReference, syncWalletBalances } from './accounting.js';
@@ -68,14 +69,15 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
   const dto = async (doc) => {
     const { paid } = await db
       .prepare(
-        'SELECT COALESCE(SUM(amount),0) AS paid FROM commercial_payments WHERE company_id=? AND voided=FALSE AND (document_id=? OR document_id=?)',
+        `SELECT COALESCE(SUM(CASE WHEN kind='REFUND' THEN -amount ELSE amount END),0) AS paid FROM commercial_payments WHERE company_id=? AND voided=FALSE AND (document_id=? OR document_id IN (SELECT id FROM commercial_documents WHERE company_id=? AND source_invoice_id=?))`,
       )
-      .get(doc.company_id, doc.id, doc.source_invoice_id ?? doc.id);
+      .get(doc.company_id, doc.source_invoice_id ?? doc.id, doc.company_id, doc.source_invoice_id ?? doc.id);
+    const fulfilled = doc.kind === 'SALE_INVOICE' && Boolean(await db.prepare("SELECT 1 FROM commercial_documents WHERE company_id=? AND source_invoice_id=? AND status='POSTED'").get(doc.company_id, doc.id));
     return {
       ...doc,
       paid,
-      outstanding: doc.status === 'CANCELLED' ? 0 : Math.max(0, doc.data.total - paid),
-      customerCredit: Math.max(0, paid - (doc.status === 'CANCELLED' ? 0 : doc.data.total)),
+      outstanding: doc.status === 'CANCELLED' || fulfilled ? 0 : Math.max(0, doc.data.total - paid),
+      customerCredit: fulfilled ? 0 : Math.max(0, paid - (doc.status === 'CANCELLED' ? 0 : doc.data.total)),
     };
   };
   const input = async (company, body, kind, previous) => {
@@ -180,9 +182,9 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
   const relatedPayments = (doc) =>
     db
       .prepare(
-        'SELECT * FROM commercial_payments WHERE company_id=? AND voided=FALSE AND (document_id=? OR document_id=?) ORDER BY business_date,id',
+        'SELECT * FROM commercial_payments WHERE company_id=? AND voided=FALSE AND (document_id=? OR document_id IN (SELECT id FROM commercial_documents WHERE company_id=? AND source_invoice_id=?)) ORDER BY business_date,id',
       )
-      .all(doc.company_id, doc.id, doc.source_invoice_id ?? doc.id);
+      .all(doc.company_id, doc.source_invoice_id ?? doc.id, doc.company_id, doc.source_invoice_id ?? doc.id);
   const recordPosting = async (company, doc, kind, lines, date = doc.business_date) => {
     const entry = await postJournal(db, company, {
       scope: doc.scope,
@@ -196,27 +198,15 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       .run(company.id, doc.id, entry.id, kind);
     return entry;
   };
-  const replacePayment = async (company, payment, doc) => {
-    const sale = doc.kind !== 'PURCHASE_ACT',
-      advance =
-        doc.kind === 'SALE_INVOICE' || doc.status !== 'POSTED' || payment.business_date < doc.business_date;
-    const account = sale
-      ? advance
-        ? 'customer_advances'
-        : 'receivables'
-      : advance
-        ? 'supplier_advances'
-        : 'payables';
-    const cash = `wallet:${payment.wallet_id}`,
-      lines = sale
-        ? [
-            { account: cash, debit: payment.amount, credit: 0 },
-            { account, debit: 0, credit: payment.amount },
-          ]
-        : [
-            { account, debit: payment.amount, credit: 0 },
-            { account: cash, debit: 0, credit: payment.amount },
-          ];
+  const replacePayment = async (company, payment, doc, debtAmount = 0) => {
+    const sale = (doc.kind !== 'PURCHASE_ACT') !== (payment.kind === 'REFUND');
+    const cash = `wallet:${payment.wallet_id}`;
+    const advanceAmount = payment.amount - debtAmount;
+    const lines = [
+      { account: cash, debit: sale ? payment.amount : 0, credit: sale ? 0 : payment.amount },
+      { account: doc.kind !== 'PURCHASE_ACT' ? 'receivables' : 'payables', debit: sale ? 0 : debtAmount, credit: sale ? debtAmount : 0 },
+      { account: doc.kind !== 'PURCHASE_ACT' ? 'customer_advances' : 'supplier_advances', debit: sale ? 0 : advanceAmount, credit: sale ? advanceAmount : 0 },
+    ].filter(line => line.debit + line.credit > 0);
     const old = await db.prepare('SELECT * FROM journal WHERE id=?').get(payment.journal_id);
     if (
       JSON.stringify(lines) !== old.lines ||
@@ -235,7 +225,6 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
           .run(old.id, n, line.account, line.debit, line.credit);
       await syncWalletBalances(db, company.id, [...JSON.parse(old.lines), ...lines]);
     }
-    return advance;
   };
   // Recompute document recognition; actual cash payments retain their identities.
   const projectDocument = async (company, doc) => {
@@ -291,55 +280,38 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         lines.filter((l) => (l.debit ?? 0) + (l.credit ?? 0) > 0),
       );
     }
-    let advancePaid = 0,
-      regularPaid = 0;
-    for (const payment of await relatedPayments(doc)) {
+    const plan = planSettlements({
+      recognized, total: doc.data.total, recognitionDate: doc.business_date,
+      payments: await relatedPayments(doc),
+    });
+    for (const { payment, debtAmount } of plan.allocations) {
       let basis = doc;
-      if (doc.status === 'CANCELLED' && payment.document_id !== doc.id)
+      if (doc.status !== 'POSTED' && payment.document_id !== doc.id)
         basis = await get(company.id, payment.document_id);
-      if (await replacePayment(company, payment, basis)) advancePaid += payment.amount;
-      else regularPaid += payment.amount;
+      await replacePayment(company, payment, basis, debtAmount);
     }
-    if (recognized) {
-      const allocation = Math.min(advancePaid, doc.data.total);
-      if (allocation)
-        await recordPosting(
-          company,
-          doc,
-          'Зачёт аванса',
-          sale
-            ? [
-                { account: 'customer_advances', debit: allocation },
-                { account: 'receivables', credit: allocation },
-              ]
-            : [
-                { account: 'payables', debit: allocation },
-                { account: 'supplier_advances', credit: allocation },
-              ],
-        );
-      const credit = Math.max(0, regularPaid + allocation - doc.data.total);
-      if (credit)
-        await recordPosting(
-          company,
-          doc,
-          'Переплата',
-          sale
-            ? [
-                { account: 'receivables', debit: credit },
-                { account: 'customer_advances', credit: credit },
-              ]
-            : [
-                { account: 'supplier_advances', debit: credit },
-                { account: 'payables', credit: credit },
-              ],
-        );
-    }
+    const allocation = plan.applied;
+    if (allocation)
+      await recordPosting(
+        company,
+        doc,
+        'Зачёт аванса',
+        sale
+          ? [
+              { account: 'customer_advances', debit: allocation },
+              { account: 'receivables', credit: allocation },
+            ]
+          : [
+              { account: 'payables', debit: allocation },
+              { account: 'supplier_advances', credit: allocation },
+            ],
+      );
   };
   const projectionBasis = async (doc) =>
     doc.kind === 'SALE_INVOICE'
       ? ((await db
           .prepare(
-            "SELECT * FROM commercial_documents WHERE company_id=? AND source_invoice_id=? AND status='POSTED'",
+            "SELECT * FROM commercial_documents WHERE company_id=? AND source_invoice_id=?",
           )
           .get(doc.company_id, doc.id)) ?? doc)
       : doc;
@@ -386,9 +358,9 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       COALESCE(sum(CASE WHEN d.status IN ('ISSUED','POSTED') AND NOT
         (d.kind='SALE_INVOICE' AND EXISTS (SELECT 1 FROM commercial_documents child
           WHERE child.company_id=d.company_id AND child.source_invoice_id=d.id AND child.status='POSTED'))
-        THEN greatest(0,(d.data->>'total')::numeric - COALESCE((SELECT sum(p.amount) FROM commercial_payments p
+        THEN greatest(0,(d.data->>'total')::numeric - COALESCE((SELECT sum(CASE WHEN p.kind='REFUND' THEN -p.amount ELSE p.amount END) FROM commercial_payments p
           WHERE p.company_id=d.company_id AND NOT p.voided AND
-            (p.document_id=d.id OR p.document_id=d.source_invoice_id)),0)) ELSE 0 END),0) AS outstanding
+            (p.document_id=COALESCE(d.source_invoice_id,d.id) OR p.document_id IN (SELECT child.id FROM commercial_documents child WHERE child.company_id=d.company_id AND child.source_invoice_id=COALESCE(d.source_invoice_id,d.id)))),0)) ELSE 0 END),0) AS outstanding
       FROM filtered d`).get(...params);
     return {
       businessDate:businessDate(undefined,company.timezone),
@@ -530,8 +502,11 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
   const settleDocument = async (company, request) => {
       await access(request, 'wallets.transact');
       const doc = await get(company.id, request.params.id);
-      if (!['ISSUED', 'POSTED'].includes(doc.status)) fail(409, 'document_not_posted');
       const body = object(request.body),
+        kind = body.kind ?? 'PAYMENT';
+      if (!['PAYMENT', 'REFUND'].includes(kind)) fail(400, 'invalid_payment_kind');
+      if (kind === 'PAYMENT' && !['ISSUED', 'POSTED'].includes(doc.status)) fail(409, 'document_not_posted');
+      const
         amount = integer(body.amount, 'amount', 1),
         walletId = text(body.walletId, 'walletId'),
         id = randomUUID(),
@@ -540,12 +515,14 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         .prepare('SELECT * FROM wallets WHERE company_id=? AND id=?')
         .get(company.id, walletId);
       if (!wallet) fail(404, 'wallet_not_found');
-      const current = await dto(doc);
-      if (amount > current.outstanding) fail(409, 'overpayment');
-      const basis = await projectionBasis(doc),
-        sale = basis.kind !== 'PURCHASE_ACT',
+      const basis = await projectionBasis(doc);
+      const current = await dto(basis.status === 'POSTED' ? basis : doc);
+      if (kind === 'PAYMENT' && amount > current.outstanding) fail(409, 'overpayment');
+      planSettlements({recognized:basis.kind !== 'SALE_INVOICE' && basis.status === 'POSTED', total:basis.data.total,
+        recognitionDate:basis.business_date, payments:[...await relatedPayments(basis), {id,amount,business_date:date,kind}]});
+      const sale = (basis.kind !== 'PURCHASE_ACT') !== (kind === 'REFUND'),
         advance = basis.kind === 'SALE_INVOICE' || basis.status !== 'POSTED' || date < basis.business_date;
-      const account = sale
+      const account = basis.kind !== 'PURCHASE_ACT'
           ? advance
             ? 'customer_advances'
             : 'receivables'
@@ -557,7 +534,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         scope: basis.scope,
         projectId: basis.project_id,
         businessDate: date,
-        description: `Оплата ${doc.number}`,
+        description: `${kind === 'REFUND' ? 'Возврат денег' : 'Оплата'} ${doc.number}`,
         lines: sale
           ? [
               { account: cash, debit: amount },
@@ -570,9 +547,9 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       });
       await db
         .prepare(
-          'INSERT INTO commercial_payments(id,company_id,document_id,wallet_id,amount,business_date,journal_id,created_at) VALUES(?,?,?,?,?,?,?,?)',
+          'INSERT INTO commercial_payments(id,company_id,document_id,wallet_id,amount,business_date,journal_id,created_at,kind) VALUES(?,?,?,?,?,?,?,?,?)',
         )
-        .run(id, company.id, doc.id, walletId, amount, date, entry.id, now());
+        .run(id, company.id, doc.id, walletId, amount, date, entry.id, now(), kind);
       await db
         .prepare(
           'INSERT INTO wallet_entries(id,company_id,wallet_id,amount,kind,reference_id,created_at,journal_id) VALUES(?,?,?,?,?,?,?,?)',
@@ -582,7 +559,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
           company.id,
           walletId,
           sale ? amount : -amount,
-          'DOCUMENT_PAYMENT',
+          kind === 'REFUND' ? 'DOCUMENT_REFUND' : 'DOCUMENT_PAYMENT',
           id,
           now(),
           entry.id,
@@ -600,6 +577,8 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         .prepare('SELECT * FROM commercial_payments WHERE company_id=? AND document_id=? AND id=?')
         .get(company.id, doc.id, request.params.paymentId);
       if (!old) fail(404, 'payment_not_found');
+      if (body.version !== undefined && body.version !== old.version) fail(409, 'version_conflict');
+      if (body.kind !== undefined && body.kind !== old.kind) fail(400, 'payment_kind_immutable');
       if (old.voided) fail(409, 'payment_voided');
       const amount = integer(body.amount ?? old.amount, 'amount', 1),
         walletId = text(body.walletId ?? old.wallet_id, 'walletId'),
@@ -610,12 +589,12 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
         .prepare('INSERT INTO entity_history(company_id,kind,entity_id,snapshot,actor_id) VALUES(?,?,?,?,?)')
         .run(company.id, 'commercial_payment', old.id, JSON.stringify(old), request.user.id);
       await db
-        .prepare('UPDATE commercial_payments SET amount=?,wallet_id=?,business_date=? WHERE id=?')
+        .prepare('UPDATE commercial_payments SET amount=?,wallet_id=?,business_date=?,version=version+1 WHERE id=?')
         .run(amount, walletId, date, old.id);
       await projectDocument(company, await projectionBasis(doc));
       await db
         .prepare('UPDATE wallet_entries SET wallet_id=?,amount=? WHERE company_id=? AND journal_id=?')
-        .run(walletId, doc.kind === 'PURCHASE_ACT' ? -amount : amount, company.id, old.journal_id);
+        .run(walletId, (doc.kind === 'PURCHASE_ACT') !== (old.kind === 'REFUND') ? -amount : amount, company.id, old.journal_id);
       return { id: old.id, document: await dto(doc) };
     }),
   );
@@ -631,7 +610,12 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
           .prepare('SELECT * FROM commercial_payments WHERE company_id=? AND document_id=? AND id=?')
           .get(company.id, doc.id, request.params.paymentId);
         if (!old) fail(404, 'payment_not_found');
+        const body = object(request.body);
+        if (body.version !== undefined && body.version !== old.version) fail(409, 'version_conflict');
         if (old.voided === voided) return { id: old.id, document: await dto(doc) };
+        const basis = await projectionBasis(doc), payments = await relatedPayments(basis);
+        planSettlements({recognized:basis.kind !== 'SALE_INVOICE' && basis.status === 'POSTED',total:basis.data.total,
+          recognitionDate:basis.business_date, payments:voided ? payments.filter(p=>p.id!==old.id) : [...payments,old]});
         const source = await db
           .prepare('SELECT * FROM journal WHERE company_id=? AND id=?')
           .get(company.id, voided ? old.journal_id : old.void_journal_id);
@@ -652,7 +636,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
           })),
         });
         await db
-          .prepare('UPDATE commercial_payments SET voided=?,void_journal_id=? WHERE id=?')
+          .prepare('UPDATE commercial_payments SET voided=?,void_journal_id=?,version=version+1 WHERE id=?')
           .run(voided, voided ? entry.id : null, old.id);
         const walletLine = entry.lines.find((l) => l.account === `wallet:${old.wallet_id}`);
         await db
@@ -679,10 +663,18 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     return {
       items: await db
         .prepare(
-          'SELECT * FROM commercial_payments WHERE company_id=? AND (document_id=? OR document_id=?) ORDER BY business_date,id',
+          'SELECT * FROM commercial_payments WHERE company_id=? AND (document_id=? OR document_id IN (SELECT id FROM commercial_documents WHERE company_id=? AND source_invoice_id=?)) ORDER BY business_date,id',
         )
-        .all(doc.company_id, doc.id, doc.source_invoice_id ?? doc.id),
+        .all(doc.company_id, doc.source_invoice_id ?? doc.id, doc.company_id, doc.source_invoice_id ?? doc.id),
     };
+  });
+  route('GET', '/:id/payments/:paymentId/history', async request => {
+    await access(request, 'documents.read');
+    const doc = await get(request.params.companyId, request.params.id);
+    const payment = await db.prepare('SELECT * FROM commercial_payments WHERE company_id=? AND document_id=? AND id=?')
+      .get(doc.company_id,doc.id,request.params.paymentId);
+    if(!payment)fail(404,'payment_not_found');
+    return {payment,items:await db.prepare("SELECT h.*,u.name AS actor_name FROM entity_history h JOIN users u ON u.id=h.actor_id WHERE h.company_id=? AND h.kind='commercial_payment' AND h.entity_id=? ORDER BY revision DESC LIMIT 200").all(doc.company_id,payment.id)};
   });
   route('GET', '/:id/history', async (request) => {
     await access(request, 'documents.read');
