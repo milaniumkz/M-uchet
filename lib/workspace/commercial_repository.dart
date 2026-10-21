@@ -54,6 +54,7 @@ class CommercialRepository {
   Future<Map<String, dynamic>> list({
     required String direction,
     String? kind,
+    String? status,
     String? projectId,
     String? after,
     String? query,
@@ -71,6 +72,7 @@ class CommercialRepository {
         if (scope != null) 'scope': scope,
         'limit': '50',
         if (kind != null) 'kind': kind,
+        if (status != null) 'status': status,
         if (projectId != null) 'projectId': projectId,
         if (after != null) 'after': after,
         if (query != null && query.isNotEmpty) 'q': query,

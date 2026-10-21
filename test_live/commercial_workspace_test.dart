@@ -137,6 +137,17 @@ void main() {
     await click(find.text('Вложения'));
     expect(find.text('ui-source.txt'), findsOneWidget);
     await click(find.byTooltip('Закрыть'));
+    final statusFilter = find.byKey(const ValueKey('commercial-status-filter'));
+    await tester.ensureVisible(statusFilter);
+    await tester.pumpAndSettle();
+    await click(statusFilter);
+    await click(find.text('Черновик').last);
+    expect(find.text('Документов пока нет. Создайте первый документ.'),
+        findsOneWidget);
+    await click(statusFilter);
+    await click(find.text('Проведён').last);
+    expect(find.text('Документов пока нет. Создайте первый документ.'),
+        findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

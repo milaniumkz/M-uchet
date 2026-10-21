@@ -350,7 +350,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     if (previous && previous.kind !== body.kind) fail(400, 'invalid_document_kind');
     return input(company, body, body.kind, previous);
   });
-  route('GET', '', async (request) => {
+  route('GET', '', (request) => readSnapshot(db, async () => {
     const company=await access(request, 'documents.read');
     const selected = request.query.projectId,
       kind = request.query.kind,
@@ -368,13 +368,15 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       await projectReference(db, request.params.companyId, selected);
     const reportScope=request.query.scope;
     if(reportScope!==undefined&&!['ACCOUNTING','MANAGEMENT'].includes(reportScope))fail(400,'invalid_report_scope');
+    const status=request.query.status;
+    if(status!==undefined&&!['DRAFT','ISSUED','POSTED','CANCELLED'].includes(status))fail(400,'invalid_document_status');
     const counterparty=request.query.counterpartyId;
     if(counterparty!==undefined)text(counterparty,'counterpartyId');
-    const filters = `company_id=? AND business_date>=? AND business_date<=?${direction === undefined ? '' : direction === 'sales' ? " AND kind IN ('SALE_INVOICE','SALE_ACT')" : " AND kind='PURCHASE_ACT'"}${search ? " AND (number ILIKE ? OR data->'counterparty'->>'name' ILIKE ?)" : ''}${selected === undefined ? '' : ' AND project_id IS NOT DISTINCT FROM ?'}${kind === undefined ? '' : ' AND kind=?'}${counterparty===undefined?'':" AND data->>'counterpartyId'=?"}${reportScope===undefined?'':" AND scope IN (?,'BOTH')"}`;
+    const filters = `company_id=? AND business_date>=? AND business_date<=?${direction === undefined ? '' : direction === 'sales' ? " AND kind IN ('SALE_INVOICE','SALE_ACT')" : " AND kind='PURCHASE_ACT'"}${search ? " AND (number ILIKE ? OR data->'counterparty'->>'name' ILIKE ?)" : ''}${selected === undefined ? '' : ' AND project_id IS NOT DISTINCT FROM ?'}${kind === undefined ? '' : ' AND kind=?'}${counterparty===undefined?'':" AND data->>'counterpartyId'=?"}${reportScope===undefined?'':" AND scope IN (?,'BOTH')"}${status===undefined?'':' AND status=?'}`;
     const params = [request.params.companyId, from, to,
       ...(search ? [pattern, pattern] : []),
       ...(selected === undefined ? [] : [selected === 'unassigned' ? null : selected]),
-      ...(kind === undefined ? [] : [kind]),...(counterparty===undefined?[]:[counterparty]),...(reportScope===undefined?[]:[reportScope])];
+      ...(kind === undefined ? [] : [kind]),...(counterparty===undefined?[]:[counterparty]),...(reportScope===undefined?[]:[reportScope]),...(status===undefined?[]:[status])];
     const rows = await db.prepare(`SELECT * FROM commercial_documents WHERE ${filters} AND id>? ORDER BY id LIMIT ?`)
       .all(...params, request.query.after ?? '', pageLimit(request.query));
     // Summaries cover the full filter, independent of pagination. An issued
@@ -394,7 +396,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
       items: await Promise.all(rows.map(dto)),
       nextCursor: rows.length === pageLimit(request.query) ? rows.at(-1).id : null,
     };
-  });
+  }));
   app.get('/v1/companies/:companyId/counterparties/:kind/:id/service-statement',{preHandler:auth},request=>readSnapshot(db,async()=>{
     const company=await access(request,'catalog.read');await access(request,'documents.read');await access(request,'accounting.read');
     const kind=request.params.kind;if(!['clients','suppliers'].includes(kind))fail(400,'invalid_counterparty_kind');

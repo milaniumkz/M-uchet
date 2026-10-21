@@ -486,6 +486,8 @@ test('service invoice advance converts to act without recognizing revenue twice'
  assert.equal(list.items.length,1);assert.equal(list.summary.count,2);assert.equal(list.summary.drafts,0);assert.equal(list.summary.outstanding,6000);
  assert.equal((await f.api('GET','/commercial-documents?direction=purchases')).body.summary.count,0);
  assert.equal((await f.api('GET','/commercial-documents?projectId=unassigned')).body.summary.count,0);
+ for(const [status,count] of [['DRAFT',0],['ISSUED',1],['POSTED',1],['CANCELLED',0]]){const result=await f.api('GET','/commercial-documents?status='+status+'&limit=1');assert.equal(result.status,200);assert.equal(result.body.summary.count,count);assert.ok(result.body.items.every(d=>d.status===status));}
+ assert.equal((await f.api('GET','/commercial-documents?status=unknown')).status,400);
  assert.equal((await f.api('GET','/reports/projects')).body.total.revenue,10000);
  assert.equal((await f.api('POST',`/commercial-documents/${act.id}/payments`,{walletId:f.wallet.id,amount:6000,businessDate:'2026-10-21'})).status,200);
  assert.equal((await f.api('GET',`/commercial-documents/${act.id}`)).body.outstanding,0);

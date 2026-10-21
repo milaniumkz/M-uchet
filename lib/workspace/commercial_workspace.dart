@@ -36,6 +36,7 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
   bool loading = true;
   String? error, cursor, kind;
   String query = '';
+  String documentStatus = '';
   late String scope = widget.initialScope;
   String? today;
   Map<String, dynamic>? summary;
@@ -60,6 +61,7 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
       final result = await repository.list(
         direction: widget.direction,
         kind: kind,
+        status: documentStatus.isEmpty ? null : documentStatus,
         scope: scope,
         projectId: widget.projectId,
         after: more ? cursor : null,
@@ -329,6 +331,30 @@ class _CommercialWorkspaceState extends State<CommercialWorkspace> {
             debounce?.cancel();
             debounce = Timer(const Duration(milliseconds: 350), () => load());
           },
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            width: 280,
+            child: DropdownButton<String>(
+              key: const ValueKey('commercial-status-filter'),
+              isExpanded: true,
+              value: documentStatus,
+              hint: const Text('Статус документа'),
+              items: [
+                const DropdownMenuItem(value: '', child: Text('Все статусы')),
+                for (final entry in documentStatuses.entries)
+                  DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+              ],
+              onChanged: loading
+                  ? null
+                  : (value) {
+                      setState(() => documentStatus = value!);
+                      load();
+                    },
+            ),
+          ),
         ),
         const SizedBox(height: 24),
         if (loading) const LinearProgressIndicator(),
