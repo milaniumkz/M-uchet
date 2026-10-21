@@ -1,3 +1,4 @@
+import { registerDashboard } from './dashboard.js';
 import { registerCounterpartyStatements } from './counterparty-statements.js';
 import { registerDebtRoutes } from './debts.js';
 import { safeErrorSummary } from './logging.js';
@@ -501,6 +502,7 @@ export async function createApp(options = {}) {
     return reply.send(createReadStream(resolve(fileDir, file.id)));
   });
   registerInvitationRoutes(app,{db,auth,owner,object});
+  registerDashboard(app,{db,auth,access});
   registerCounterpartyStatements(app,{db,auth,access,pageLimit});
   registerDebtRoutes(app,{db,auth,access,command,object,pageLimit});
   registerSearchRoutes(app,{db,auth});

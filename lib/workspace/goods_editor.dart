@@ -35,12 +35,14 @@ class GoodsEditor extends StatefulWidget {
     required this.today,
     this.order,
     this.projectId,
+    this.initialScope = 'ACCOUNTING',
   });
   final BackendClient api;
   final String companyId, currency, today;
   final List<Map<String, dynamic>> projects;
   final Map<String, dynamic>? order;
   final String? projectId;
+  final String initialScope;
   @override
   State<GoodsEditor> createState() => _GoodsEditorState();
 }
@@ -67,7 +69,7 @@ class _GoodsEditorState extends State<GoodsEditor> {
     note.text = d?['note'] as String? ?? '';
     vatReason.text = d?['vatReason'] as String? ?? '';
     vat = d?['vatBasisPoints'] as int? ?? 0;
-    scope = d?['scope'] as String? ?? 'ACCOUNTING';
+    scope = d?['scope'] as String? ?? widget.initialScope;
     counterpartyId = d?['counterpartyId'] as String?;
     projectId = d == null
         ? (widget.projectId == 'unassigned' ? null : widget.projectId)

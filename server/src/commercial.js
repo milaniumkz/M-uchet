@@ -351,7 +351,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
     return input(company, body, body.kind, previous);
   });
   route('GET', '', async (request) => {
-    await access(request, 'documents.read');
+    const company=await access(request, 'documents.read');
     const selected = request.query.projectId,
       kind = request.query.kind,
       direction = request.query.direction;
@@ -389,6 +389,7 @@ export function registerCommercialRoutes(app, { db, auth, access, command, pageL
             (p.document_id=d.id OR p.document_id=d.source_invoice_id)),0)) ELSE 0 END),0) AS outstanding
       FROM filtered d`).get(...params);
     return {
+      businessDate:businessDate(undefined,company.timezone),
       summary,
       items: await Promise.all(rows.map(dto)),
       nextCursor: rows.length === pageLimit(request.query) ? rows.at(-1).id : null,

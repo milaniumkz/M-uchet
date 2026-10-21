@@ -127,6 +127,22 @@ class CatalogRepository {
         .toList(growable: false);
   }
 
+  Future<List<ResourceDto>> listAll(String kind) async {
+    final items = <ResourceDto>[], seen = <String>{};
+    String? after;
+    while (true) {
+      final rows = await list(kind, after: after);
+      for (final row in rows) {
+        if (!seen.add(row.id)) {
+          throw const BackendException('invalid_resource_response');
+        }
+      }
+      items.addAll(rows);
+      if (rows.length < 50) return items;
+      after = rows.last.id;
+    }
+  }
+
   Future<ResourceDto> create(String kind, Map<String, dynamic> data) async =>
       ResourceDto.fromJson(
         await api.request('POST', _path(kind), body: {'data': data}),

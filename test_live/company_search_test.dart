@@ -1,3 +1,4 @@
+import 'package:uchet_s_d/workspace/commercial_detail.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -158,7 +159,13 @@ void main() {
       await click(find.text('Отмена'));
       await search(number);
       await click(find.widgetWithText(ListTile, number));
-      expect(find.textContaining('№ $number'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CommercialDetail),
+          matching: find.textContaining('№ $number'),
+        ),
+        findsOneWidget,
+      );
       await click(find.byTooltip('Закрыть'));
       await search('SEARCH COPPER');
       await click(find.widgetWithText(ListTile, 'SEARCH COPPER'));

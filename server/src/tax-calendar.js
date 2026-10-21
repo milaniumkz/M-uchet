@@ -133,6 +133,10 @@ export function registerTaxCalendarRoutes(
       },
     ),
   );
+  route("GET", "/:id", async (request) => {
+    const company = await access(request, "tax-calendar.read");
+    return get(company.id, text(request.params.id, "taskId"));
+  });
   route("PUT", "/:id", (request) =>
     command(
       request,

@@ -9,8 +9,8 @@
       "platform": "desktop",
       "status": "partial",
       "visual_parity_verified": false,
-      "source": "lib/main_server.dart",
-      "implemented_scope": "Проекты, сводка, период и денежные операции; общий поиск фирмы с переходом в карточки"
+      "source": "lib/workspace/home_workspace.dart",
+      "implemented_scope": "Отдельная главная: реальные денежные остатки/долги, график шести месяцев, задачи и последние документы, переходы к основанию, создание с проектом/контуром/датой фирмы и общий поиск. Проекты сохранены отдельным разделом. Визуальная идентичность не подтверждена."
     },
     {
       "id": "D-02",
@@ -55,7 +55,7 @@
       "status": "partial",
       "visual_parity_verified": false,
       "source": "lib/workspace/commercial_editor.dart",
-      "implemented_scope": "Редактор счёта услуг и серверный расчёт"
+      "implemented_scope": "Редактор счёта услуг и серверный расчёт Выбор вида учёта и полный список контрагентов/услуг, дата фирмы и исторические даты до2000."
     },
     {
       "id": "D-07",
@@ -271,8 +271,8 @@
       "platform": "mobile",
       "status": "partial",
       "visual_parity_verified": false,
-      "source": "lib/main_server.dart",
-      "implemented_scope": "Адаптивные проекты и общая сводка"
+      "source": "lib/workspace/home_workspace.dart",
+      "implemented_scope": "Отдельная мобильная компоновка: крупный остаток, две карточки долгов, создание документа, ближайшая задача, нижняя навигация и меню всех разрешённых разделов; выбор фирмы/проекта/контура, график и документы ниже. Визуальная идентичность не подтверждена."
     },
     {
       "id": "M-02",

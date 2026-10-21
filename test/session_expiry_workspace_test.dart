@@ -31,6 +31,14 @@ void main() {
                   'role': 'owner',
                 },
               ];
+            case 'GET /v1/companies/one/dashboard':
+              value = {
+                'money': {'cash': 0, 'receivables': 0, 'payables': 0},
+                'chart': [],
+                'tasks': [],
+                'recentDocuments': [],
+                'userName': 'SYNTHETIC OWNER',
+              };
             case 'GET /v1/companies/one/projects':
               value = {'items': []};
             case 'GET /v1/companies/one/reports/projects':

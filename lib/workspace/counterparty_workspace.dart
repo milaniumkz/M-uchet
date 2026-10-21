@@ -122,8 +122,8 @@ class _CounterpartyWorkspaceState extends State<CounterpartyWorkspace> {
   Future<void> pickPeriod() async {
     final chosen = await showDateRangePicker(
       context: context,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
+      firstDate: DateTime(1),
+      lastDate: DateTime(9999, 12, 31),
       initialDateRange: period,
       helpText: 'Период расчётов',
     );

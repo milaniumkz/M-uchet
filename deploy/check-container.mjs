@@ -171,6 +171,9 @@ try {
     version: 3,
     reason: "SYNTHETIC CONTAINER RECONCILIATION CORRECTION",
   });
+  const dashboard = await request("GET", base + "/dashboard");
+  assert.equal(dashboard.money.cash, 1234867);
+  assert.equal(dashboard.chart.at(-1).closing, 1234867);
   const task = await request("POST", base + "/tax-calendar", {
     title: "SYNTHETIC CONTAINER TASK",
     dueDate: "2026-01-26",
@@ -425,7 +428,7 @@ try {
   ).token;
   assert.ok(token);
   console.log(
-    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected opening debt, combined counterparty statement, bank unmatch, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
+    "Container checks passed: private registration, offline owner, HTTP/web, exact wallet, corrected opening debt, combined counterparty statement, bank unmatch, dashboard cash history, calendar, upload, restart, encrypted backup/restore, wrong-key/tamper rejection and recovery after failed dump, offline recovery, restricted database role, non-root and read-only filesystem.",
   );
 } catch (error) {
   try {

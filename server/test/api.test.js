@@ -1457,3 +1457,53 @@ test('combined supplier statement includes assets and initial payables and their
  const outsider=await f.user('statement-outsider@example.test');assert.equal((await f.call('GET',f.prefix+path,null,outsider.token)).status,404);
  assert.equal((await f.api('GET',`/counterparties/clients/${f.supplier.id}/statement`)).status,404);
 });
+
+test('home dashboard uses exact dated money and six-month balances including historical opening cash and project filters',async t=>{
+ const f=await commercialFixture(t),empty=await f.api('GET','/dashboard');assert.equal(empty.status,200,JSON.stringify(empty.body));const day=empty.body.companyBusinessDate;
+ const other=(await f.api('POST','/wallets',{name:'SYNTHETIC DASHBOARD SECOND WALLET'})).body;
+ await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:1000,businessDate:day,description:'SYNTHETIC DASHBOARD CAPITAL'});
+ const beforeWindow=new Date(empty.body.chart[0].month+'-01T00:00:00Z');beforeWindow.setUTCMonth(beforeWindow.getUTCMonth()-1);
+ await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'CAPITAL',amount:100,businessDate:beforeWindow.toISOString().slice(0,10),description:'SYNTHETIC HISTORICAL OPENING CASH'});
+ await f.api('POST','/wallet-transfers',{sourceWalletId:f.wallet.id,targetWalletId:other.id,amount:400,businessDate:day});
+ await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'INCOME',amount:200,businessDate:day,projectId:f.project.id,description:'SYNTHETIC DASHBOARD INCOME'});
+ await f.api('POST',`/wallets/${f.wallet.id}/transactions`,{type:'EXPENSE',amount:50,businessDate:day,projectId:f.project.id,description:'SYNTHETIC DASHBOARD EXPENSE'});
+ const debt=(await f.api('POST','/debts',{type:'AR',counterpartyId:f.client.id,amount:500,businessDate:day,projectId:f.project.id})).body;
+ const receipt=(await f.api('POST',`/debts/${debt.id}/settlements`,{walletId:f.wallet.id,amount:200,businessDate:day})).body;
+ const supplier=(await f.api('POST','/debts',{type:'AP',counterpartyId:f.supplier.id,amount:100,businessDate:day})).body;
+ await f.api('POST',`/debts/${supplier.id}/settlements`,{walletId:f.wallet.id,amount:150,businessDate:day,allowAdvance:true});
+ const result=(await f.api('GET','/dashboard')).body;assert.deepEqual(result.money,{cash:1300,receivables:300,payables:0,customerAdvances:0,supplierAdvances:50});
+ assert.equal(result.chart.length,6);assert.deepEqual(result.chart.at(-1),{month:day.slice(0,7),opening:100,closing:1300});assert.ok(result.chart.slice(0,-1).every(m=>m.opening===100&&m.closing===100));
+ const project=(await f.api('GET',`/dashboard?projectId=${f.project.id}`)).body;assert.equal(project.money.cash,350);assert.equal(project.money.receivables,300);assert.equal(project.chart.at(-1).closing,350);
+ assert.equal((await f.api('POST',`/debts/${debt.id}/payments/${receipt.id}/void`,{version:1})).status,200);
+ const cancelled=(await f.api('GET','/dashboard')).body;assert.equal(cancelled.money.cash,1100);assert.equal(cancelled.chart.at(-1).closing,1100);
+ assert.equal((await f.api('GET','/dashboard?scope=BOTH')).status,400);
+ const outsider=await f.user('dashboard-outsider@example.test');assert.equal((await f.call('GET',f.prefix+'/dashboard',null,outsider.token)).status,404);
+});
+test('home dashboard shows real draft and confirmed tasks but never leaks categories without read permission',async t=>{
+ const f=await commercialFixture(t),day=(await f.api('GET','/dashboard')).body.companyBusinessDate;
+ const draft=(await f.api('POST','/commercial-documents',f.body)).body;
+ await f.api('POST','/bank-imports',{walletId:f.wallet.id,csv:`date;reference;debit;credit;description\n${day};dashboard-pending;0;1.00;SYNTHETIC DASHBOARD PENDING`});
+ await f.api('POST','/tax-calendar',{title:'SYNTHETIC CANCELLED TAX TASK',dueDate:day,status:'CANCELLED',category:'TAX',dueDateConfirmed:true,source:'SYNTHETIC CHECKED SOURCE'});
+ const tax=(await f.api('POST','/tax-calendar',{title:'SYNTHETIC REAL TAX TASK',dueDate:day,status:'OPEN',category:'TAX',dueDateConfirmed:true,source:'SYNTHETIC CHECKED SOURCE'})).body;
+ const loaded=await f.api('GET','/tax-calendar/'+tax.id);assert.equal(loaded.status,200);assert.equal(loaded.body.version,1);
+ const result=(await f.api('GET','/dashboard')).body;assert.ok(result.recentDocuments.some(d=>d.id===draft.id&&d.total===10000));assert.ok(result.tasks.some(t=>t.kind==='DOCUMENT_DRAFT'&&t.id===draft.id));assert.ok(result.tasks.some(t=>t.kind==='BANK_REVIEW'&&t.count===1));assert.ok(result.tasks.some(t=>t.kind==='TAX_TASK'&&t.id===tax.id));assert.equal(result.tasks.some(t=>t.title==='SYNTHETIC CANCELLED TAX TASK'),false);
+ const reader=await f.user('dashboard-reader@example.test');await f.api('PUT',`/members/${reader.id}`,{permissions:['reports.read','accounting.read','wallets.read']});
+ assert.equal((await f.call('GET',f.prefix+'/tax-calendar/'+tax.id,null,reader.token)).status,403);
+ const restricted=(await f.call('GET',f.prefix+'/dashboard',null,reader.token)).body;assert.deepEqual(restricted.tasks,[]);assert.deepEqual(restricted.recentDocuments,[]);
+ await f.api('PUT',`/members/${reader.id}`,{permissions:['reports.read']});assert.equal((await f.call('GET',f.prefix+'/dashboard',null,reader.token)).status,403);
+});
+
+test('home operational balances include researched numeric cash and customer supplier accounts without classifying plants or impairment reserves as cash',async t=>{
+ const f=await fixture(t),post=async(lines)=>{const result=await f.api('POST','/accounting/journal',{description:'SYNTHETIC NUMERIC HOME',lines});assert.equal(result.status,200,JSON.stringify(result.body));};
+ await post([{account:'1030',debit:100000},{account:'capital',credit:100000}]);
+ await post([{account:'1210',debit:5000},{account:'revenue',credit:5000}]);
+ await post([{account:'2110',debit:700},{account:'revenue',credit:700}]);
+ await post([{account:'inventory',debit:7000},{account:'3310',credit:7000}]);
+ await post([{account:'inventory',debit:300},{account:'4110',credit:300}]);
+ await post([{account:'1030',debit:400},{account:'3510',credit:400}]);
+ await post([{account:'1710',debit:250},{account:'1030',credit:250}]);
+ await post([{account:'1610',debit:999},{account:'capital',credit:999}]);
+ await post([{account:'expenses',debit:50},{account:'1090',credit:50}]);
+ const response=await f.api('GET','/dashboard');assert.equal(response.status,200,JSON.stringify(response.body));const result=response.body;
+ assert.deepEqual(result.money,{cash:100150,receivables:5700,payables:7300,customerAdvances:400,supplierAdvances:250});assert.equal(result.chart.at(-1).closing,100150);assert.equal(result.numericReferenceVersion,'reference-2026-text-retrieved-2026-10-20');
+});

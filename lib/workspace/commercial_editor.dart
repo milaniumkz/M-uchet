@@ -15,10 +15,13 @@ class CommercialEditor extends StatefulWidget {
     required this.direction,
     this.projectId,
     this.document,
+    this.today,
+    this.initialScope = 'ACCOUNTING',
   });
   final BackendClient api;
   final String companyId, currency, direction;
-  final String? projectId;
+  final String? projectId, today;
+  final String initialScope;
   final List<Map<String, dynamic>> projects;
   final Map<String, dynamic>? document;
   @override
@@ -48,7 +51,7 @@ class _CommercialEditorState extends State<CommercialEditor> {
   List<ResourceDto> parties = [], services = [];
   Map<String, dynamic>? preview;
   String? counterpartyId, projectId, error;
-  late String kind, date;
+  late String kind, date, scope;
   String note = '', vatReason = '', externalNumber = '';
   int vat = 0;
   bool loading = true, busy = false, uncertain = false, refreshDetails = false;
@@ -59,11 +62,13 @@ class _CommercialEditorState extends State<CommercialEditor> {
     super.initState();
     final doc = widget.document,
         data = doc == null ? null : jsonObject(doc['data']);
+    scope = doc?['scope'] as String? ?? widget.initialScope;
     kind =
         doc?['kind'] as String? ??
         (widget.direction == 'purchases' ? 'PURCHASE_ACT' : 'SALE_INVOICE');
     date =
         doc?['business_date'] as String? ??
+        widget.today ??
         DateTime.now().toIso8601String().substring(0, 10);
     projectId = doc == null
         ? (widget.projectId == 'unassigned' ? null : widget.projectId)
@@ -96,8 +101,10 @@ class _CommercialEditorState extends State<CommercialEditor> {
     try {
       final catalog = CatalogRepository(widget.api, widget.companyId);
       final results = await Future.wait([
-        catalog.list(widget.direction == 'purchases' ? 'suppliers' : 'clients'),
-        catalog.list('services'),
+        catalog.listAll(
+          widget.direction == 'purchases' ? 'suppliers' : 'clients',
+        ),
+        catalog.listAll('services'),
       ]);
       if (!mounted) {
         return;
@@ -126,7 +133,7 @@ class _CommercialEditorState extends State<CommercialEditor> {
       'counterpartyId': counterpartyId,
       'businessDate': date,
       'projectId': projectId,
-      'scope': widget.document?['scope'] ?? 'ACCOUNTING',
+      'scope': scope,
       'vatBasisPoints': vat,
       'vatReason': vatReason,
       'vatTreatment': vatTreatment,
@@ -206,8 +213,8 @@ class _CommercialEditorState extends State<CommercialEditor> {
     final value = await showDatePicker(
       context: context,
       initialDate: DateTime.parse(date),
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
+      firstDate: DateTime(1),
+      lastDate: DateTime(9999, 12, 31),
     );
     if (value != null) {
       setState(() => date = value.toIso8601String().substring(0, 10));
@@ -461,6 +468,34 @@ class _CommercialEditorState extends State<CommercialEditor> {
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<String>(
+                          initialValue: scope,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Вид учёта',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'ACCOUNTING',
+                              child: Text('Бухгалтерский учёт'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'MANAGEMENT',
+                              child: Text('Управленческий учёт'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'BOTH',
+                              child: Text('Оба вида учёта'),
+                            ),
+                          ],
+                          onChanged: enabled
+                              ? (v) => setState(() {
+                                  scope = v!;
+                                  preview = null;
+                                })
+                              : null,
                         ),
                         const SizedBox(height: 24),
                         const Text(

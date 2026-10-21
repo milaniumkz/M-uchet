@@ -626,7 +626,10 @@ class _TaxTaskEditorState extends State<TaxTaskEditor> {
   late String status = widget.task?['status'] as String? ?? 'OPEN',
       category =
           (widget.task?['data'] as Map?)?['category'] as String? ?? 'TAX';
-  bool confirmed = false, busy = false;
+  late bool confirmed =
+      (widget.task?['data'] as Map?)?['dueDateConfirmed'] == true;
+  bool busy = false;
+  bool get canWrite => hasCompanyPermission(context, 'tax-calendar.write');
   String? error;
   RetriableCommand? pending;
   @override
@@ -688,7 +691,13 @@ class _TaxTaskEditorState extends State<TaxTaskEditor> {
   Widget build(BuildContext context) => PopScope(
     canPop: pending == null && !busy,
     child: AlertDialog(
-      title: Text(widget.task == null ? 'Новая задача' : 'Изменить задачу'),
+      title: Text(
+        !canWrite
+            ? 'Налоговая задача'
+            : widget.task == null
+            ? 'Новая задача'
+            : 'Изменить задачу',
+      ),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(
@@ -697,12 +706,14 @@ class _TaxTaskEditorState extends State<TaxTaskEditor> {
             children: [
               TextField(
                 controller: title,
-                enabled: !busy && pending == null,
+                onChanged: (_) => setState(() => confirmed = false),
+                enabled: canWrite && !busy && pending == null,
                 decoration: const InputDecoration(labelText: 'Название задачи'),
               ),
               TextField(
                 controller: due,
-                enabled: !busy && pending == null,
+                onChanged: (_) => setState(() => confirmed = false),
+                enabled: canWrite && !busy && pending == null,
                 decoration: const InputDecoration(labelText: 'Срок YYYY-MM-DD'),
               ),
               DropdownButtonFormField<String>(
@@ -714,9 +725,12 @@ class _TaxTaskEditorState extends State<TaxTaskEditor> {
                           DropdownMenuItem(value: e.key, child: Text(e.value)),
                     )
                     .toList(),
-                onChanged: busy || pending != null
+                onChanged: !canWrite || busy || pending != null
                     ? null
-                    : (v) => setState(() => category = v!),
+                    : (v) => setState(() {
+                        category = v!;
+                        confirmed = false;
+                      }),
               ),
               DropdownButtonFormField<String>(
                 initialValue: status,
@@ -727,13 +741,14 @@ class _TaxTaskEditorState extends State<TaxTaskEditor> {
                           DropdownMenuItem(value: e.key, child: Text(e.value)),
                     )
                     .toList(),
-                onChanged: busy || pending != null
+                onChanged: !canWrite || busy || pending != null
                     ? null
                     : (v) => setState(() => status = v!),
               ),
               TextField(
                 controller: source,
-                enabled: !busy && pending == null,
+                onChanged: (_) => setState(() => confirmed = false),
+                enabled: canWrite && !busy && pending == null,
                 decoration: const InputDecoration(
                   labelText: 'Основание / ссылка на источник',
                 ),
@@ -741,7 +756,7 @@ class _TaxTaskEditorState extends State<TaxTaskEditor> {
               ),
               TextField(
                 controller: notes,
-                enabled: !busy && pending == null,
+                enabled: canWrite && !busy && pending == null,
                 decoration: const InputDecoration(labelText: 'Примечание'),
                 maxLines: 3,
               ),
@@ -749,7 +764,7 @@ class _TaxTaskEditorState extends State<TaxTaskEditor> {
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Дата и применимость срока проверены мной'),
                 value: confirmed,
-                onChanged: busy || pending != null
+                onChanged: !canWrite || busy || pending != null
                     ? null
                     : (v) => setState(() => confirmed = v!),
               ),
@@ -767,7 +782,7 @@ class _TaxTaskEditorState extends State<TaxTaskEditor> {
           child: const Text('Отмена'),
         ),
         FilledButton(
-          onPressed: busy ? null : save,
+          onPressed: !canWrite || busy ? null : save,
           child: Text(
             pending == null ? 'Сохранить задачу' : 'Повторить сохранение',
           ),

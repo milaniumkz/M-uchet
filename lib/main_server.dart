@@ -1,3 +1,6 @@
+import 'workspace/home_workspace.dart';
+import 'workspace/commercial_editor.dart';
+import 'workspace/goods_editor.dart';
 import 'workspace/debts_workspace.dart';
 import 'workspace/company_search.dart';
 import 'workspace/commercial_detail.dart';
@@ -28,7 +31,8 @@ import 'workspace/account_dialog.dart';
 import 'workspace/help_workspace.dart';
 import 'workspace/goods_workspace.dart';
 import 'workspace/payroll_workspace.dart';
-import 'workspace/commercial_repository.dart' show moneyText;
+import 'workspace/commercial_repository.dart'
+    show moneyText, CommercialRepository;
 
 void main() => runApp(const AccountingWorkspace());
 const ink = Color(0xFF171B35),
@@ -61,8 +65,10 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   List<Map<String, dynamic>> projects = [];
   Map<String, dynamic>? report;
   String? selected, error;
-  String section = 'projects';
+  String section = 'home';
+  String homeScope = 'ACCOUNTING';
   final sections = const {
+    'home': 'Главная',
     'projects': 'Проекты',
     'sales': 'Продажи',
     'goods': 'Товарные продажи',
@@ -85,6 +91,8 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   };
   bool can(String permission) => company?.allows(permission) ?? true;
   bool visible(String key) => switch (key) {
+    'home' =>
+      can('reports.read') && can('accounting.read') && can('wallets.read'),
     'tax-calendar' => can('tax-calendar.read'),
     'access' => company?.role == 'owner',
     'help' => true,
@@ -398,8 +406,8 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   Future<void> choosePeriod() async {
     final value = await showDateRangePicker(
       context: navigator.currentContext!,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
+      firstDate: DateTime(1),
+      lastDate: DateTime(9999, 12, 31),
       initialDateRange: period,
       helpText: 'Период отчёта',
       saveText: 'Применить',
@@ -1107,6 +1115,208 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     }
   }
 
+  Future<void> openHomeDocument(String kind, String id) async {
+    final current = company;
+    if (current == null) return;
+    if (kind == 'GOODS') {
+      await showGoodsOrder(
+        navigator.currentContext!,
+        api: api,
+        companyId: current.id,
+        orderId: id,
+        currency: current.currency,
+        projects: projects,
+        onChanged: refresh,
+      );
+    } else {
+      Map<String, dynamic>? document;
+      await perform(() async {
+        document = await CommercialRepository(api, current.id).get(id);
+      });
+      if (!mounted || document == null || company?.id != current.id) return;
+      await showDialog<void>(
+        context: navigator.currentContext!,
+        barrierDismissible: false,
+        builder: (_) => CommercialDetail(
+          api: api,
+          companyId: current.id,
+          currency: current.currency,
+          document: document!,
+          projects: projects,
+          onChanged: refresh,
+        ),
+      );
+    }
+    if (mounted && company?.id == current.id) await perform(refresh);
+  }
+
+  Future<void> homeMore() async {
+    final result = await showModalBottomSheet<String>(
+      context: navigator.currentContext!,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * .75,
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'Разделы',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final entry in visibleSections)
+                      ListTile(
+                        title: Text(entry.value),
+                        onTap: () =>
+                            Navigator.pop(context, 'section:${entry.key}'),
+                      ),
+                    if (can('organization.read'))
+                      ListTile(
+                        title: const Text('Настройки фирмы'),
+                        onTap: () => Navigator.pop(context, 'settings'),
+                      ),
+                    ListTile(
+                      title: const Text('Мой аккаунт'),
+                      onTap: () => Navigator.pop(context, 'account'),
+                    ),
+                    if (canCreateCompanies)
+                      ListTile(
+                        title: const Text('Добавить фирму'),
+                        onTap: () => Navigator.pop(context, 'create-company'),
+                      ),
+                    ListTile(
+                      title: const Text('Выйти'),
+                      onTap: () => Navigator.pop(context, 'logout'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    if (result.startsWith('section:')) {
+      setState(() => section = result.substring(8));
+    } else if (result == 'settings') {
+      await companySettings();
+    } else if (result == 'account') {
+      await account();
+    } else if (result == 'create-company') {
+      setState(() => creatingCompany = true);
+    } else if (result == 'logout') {
+      await logout();
+    }
+  }
+
+  Future<void> openHomeTask(Map<String, dynamic> task) async {
+    if (task['kind'] == 'DOCUMENT_DRAFT') {
+      await openHomeDocument('SERVICE', task['id'] as String);
+    } else if (task['kind'] == 'BANK_REVIEW') {
+      setState(() => section = 'bank');
+    } else if (task['kind'] == 'TAX_TASK') {
+      final current = company;
+      if (current == null) return;
+      final path = ['v1', 'companies', current.id, 'tax-calendar'];
+      Map<String, dynamic>? record;
+      await perform(() async {
+        record = jsonObject(
+          await api.request('GET', [...path, task['id'] as String]),
+        );
+      });
+      if (!mounted || record == null || company?.id != current.id) return;
+      await showDialog<bool>(
+        context: navigator.currentContext!,
+        barrierDismissible: false,
+        builder: (_) => TaxTaskEditor(
+          api: api,
+          path: path,
+          task: record,
+          initialDate: record!['due_date'] as String,
+        ),
+      );
+    }
+  }
+
+  bool get canCreateHomeDocument =>
+      can('catalog.read') &&
+      ((can('documents.read') && can('documents.write')) ||
+          (can('orders.read') && can('orders.write')));
+  Future<void> createHomeDocument(String today) async {
+    final current = company;
+    if (current == null) return;
+    final kind = await showDialog<String>(
+      context: navigator.currentContext!,
+      builder: (context) => SimpleDialog(
+        title: const Text('Создать документ'),
+        children: [
+          if (can('documents.read') &&
+              can('documents.write') &&
+              can('catalog.read')) ...[
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, 'sales'),
+              child: const Text('Счёт или акт услуг'),
+            ),
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, 'purchases'),
+              child: const Text('Поступление услуг'),
+            ),
+          ],
+          if (can('orders.read') && can('orders.write') && can('catalog.read'))
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, 'goods'),
+              child: const Text('Товарная продажа'),
+            ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Отмена'),
+          ),
+        ],
+      ),
+    );
+    if (kind == null || !mounted || company?.id != current.id) return;
+    if (kind == 'goods') {
+      final id = await showDialog<String>(
+        context: navigator.currentContext!,
+        barrierDismissible: false,
+        builder: (_) => GoodsEditor(
+          api: api,
+          companyId: current.id,
+          currency: current.currency,
+          projects: projects,
+          today: today,
+          initialScope: homeScope,
+          projectId: selected == 'unassigned' ? null : selected,
+        ),
+      );
+      if (id != null && mounted) await openHomeDocument('GOODS', id);
+    } else {
+      final doc = await showDialog<Map<String, dynamic>>(
+        context: navigator.currentContext!,
+        barrierDismissible: false,
+        builder: (_) => CommercialEditor(
+          api: api,
+          companyId: current.id,
+          currency: current.currency,
+          projects: projects,
+          direction: kind,
+          today: today,
+          initialScope: homeScope,
+          projectId: selected,
+        ),
+      );
+      if (doc != null && mounted) {
+        await openHomeDocument('SERVICE', doc['id'] as String);
+      }
+    }
+  }
+
   Widget searchButton() => Tooltip(
     message: 'Поиск по фирме',
     child: OutlinedButton.icon(
@@ -1119,20 +1329,62 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
   Widget navigation() => Container(
     width: 222,
     color: Colors.white,
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.fromLTRB(14, 24, 14, 14),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'М-УЧЁТ',
-          style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
+        const Padding(
+          padding: EdgeInsets.only(left: 14),
+          child: Text(
+            'М-учёт',
+            style: TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.bold,
+              color: ink,
+            ),
+          ),
         ),
-        const SizedBox(height: 32),
-        Text(
-          company!.name,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        const SizedBox(height: 4),
+        const Padding(
+          padding: EdgeInsets.only(left: 14),
+          child: Text(
+            'УЧЁТ БЕЗ ЛИШНЕГО',
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF66748F),
+            ),
+          ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 28),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF5F7FB),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                company!.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 5),
+              const Text(
+                'Рабочая фирма',
+                style: TextStyle(fontSize: 10, color: Color(0xFF66748F)),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
         Expanded(
           child: ListView(
             children: visibleSections
@@ -1144,10 +1396,13 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    contentPadding: EdgeInsets.zero,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    minLeadingWidth: 20,
+                    horizontalTitleGap: 8,
                     selected: section == entry.key,
                     selectedColor: accent,
                     leading: Icon(switch (entry.key) {
+                      'home' => Icons.home_outlined,
                       'projects' => Icons.folder_outlined,
                       'sales' => Icons.receipt_long_outlined,
                       'goods' => Icons.local_shipping_outlined,
@@ -1167,7 +1422,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                       'periods' => Icons.calendar_month_outlined,
                       'counterparties' => Icons.people_outline,
                       _ => Icons.inventory_2_outlined,
-                    }),
+                    }, size: 20),
                     title: Text(
                       entry.value,
                       style: const TextStyle(fontSize: 13),
@@ -1212,13 +1467,23 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
           icon: const Icon(Icons.add_business_outlined),
         ),
       Expanded(
-        child: DropdownButton<String>(
-          value: section,
-          isExpanded: true,
-          items: visibleSections
-              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-              .toList(),
-          onChanged: busy ? null : (value) => setState(() => section = value!),
+        child: Tooltip(
+          message: 'Разделы',
+          child: TextButton(
+            onPressed: busy ? null : homeMore,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    sections[section] ?? 'Разделы',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Icon(Icons.expand_more, size: 20),
+              ],
+            ),
+          ),
         ),
       ),
     ],
@@ -1230,6 +1495,61 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
     if (section == 'projects') {
       return projectWorkspace();
     }
+    if (section == 'home') {
+      return LayoutBuilder(
+        builder: (context, size) => Row(
+          children: [
+            if (size.maxWidth >= 1000) navigation(),
+            Expanded(
+              child: Column(
+                children: [
+                  if (busy) const LinearProgressIndicator(),
+                  if (error != null)
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                        error!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  Expanded(
+                    child: HomeWorkspace(
+                      key: ValueKey('home:${company!.id}:$selected:$homeScope'),
+                      scope: homeScope,
+                      onScope: (value) => setState(() => homeScope = value),
+                      api: api,
+                      company: company!,
+                      companies: companies,
+                      projects: projects,
+                      projectId: selected,
+                      onCompany: (id) => perform(() async {
+                        company = companies.firstWhere((c) => c.id == id);
+                        selected = null;
+                        await refresh();
+                      }),
+                      onProject: (id) => perform(() async {
+                        selected = id;
+                        await refresh();
+                      }),
+                      onSearch: companySearch,
+                      onAccount: account,
+                      onCreate: createHomeDocument,
+                      canCreate: canCreateHomeDocument,
+                      onOpenDocument: openHomeDocument,
+                      onTask: openHomeTask,
+                      onMore: homeMore,
+                      onOpenSection: (key) => setState(() => section = key),
+                      canOpenSection: visible,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return LayoutBuilder(
       builder: (context, size) => Row(
         children: [
@@ -1378,6 +1698,7 @@ class _AccountingWorkspaceState extends State<AccountingWorkspace> {
                           companyId: company!.id,
                           currency: company!.currency,
                           direction: section,
+                          initialScope: homeScope,
                           projects: projects,
                           projectId: selected,
                           from: period == null ? null : date(period!.start),
